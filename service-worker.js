@@ -8,13 +8,14 @@
    al browser «la copia che tieni e' vecchia, riscaricala». Senza, chi l'ha gia'
    installata resta per sempre alla versione di prima.  */
 
-var VERSIONE = 'cassa-bar-3';
+var VERSIONE = 'cassa-bar-4';
 
 var FILE = [
   './',
   './index.html',
   './stile.css',
   './cassa.js',
+  './sincronia.js',
   './manifest.webmanifest',
   './icona-192.png',
   './icona-512.png',
@@ -51,6 +52,13 @@ self.addEventListener('activate', function (e) {
    Le richieste che non sono semplici letture non si toccano. */
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') { return; }
+
+  /* Solo la roba nostra. Le richieste al server della sincronizzazione partono da
+     un altro indirizzo e non devono MAI finire in cassaforte: una risposta vecchia
+     tenuta da parte vorrebbe dire vedere per giorni un listino sbagliato senza
+     capire perche'. Sono tutte POST e gia' la riga sopra le lascerebbe passare,
+     ma questa e' la rete di sicurezza che regge anche se un giorno cambiassero. */
+  if (new URL(e.request.url).origin !== self.location.origin) { return; }
 
   e.respondWith(
     caches.match(e.request).then(function (trovato) {

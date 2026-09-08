@@ -10,8 +10,24 @@
 
 var CHIAVE = 'cassa-bar-scolastico.v1';
 
-// I tagli che il cliente puo' allungare. In centesimi.
-var TAGLI = [50, 100, 200, 500, 1000, 2000];
+/* L'IMPRONTA della password, non la password. Serve a non lasciarla scritta in
+   chiaro in un file che chiunque puo' aprire dal sito.
+
+   Da sapere, perche' non si scopra dopo: e' un lucchetto contro gli ERRORI e contro
+   i curiosi, non contro chi sa usare gli strumenti per sviluppatori del browser.
+   Deve stare qui perche' l'app deve aprirsi anche senza rete. I permessi veri -
+   cambiare i prezzi, togliere una giornata - non passano da qui: li decide il
+   server, che sui permessi non si fida mai di quello che dice l'app.
+
+   Per cambiarla si rifa' l'impronta e si sostituisce questa riga:
+     python -c "import hashlib; print(hashlib.sha256('nuova'.encode()).hexdigest())"  */
+var IMPRONTA_PASSWORD = '2a8981c01f050ea08357ca1a233c67f2364839bd3a45ed1afe713f64f4241d15';
+
+/* I tagli che il cliente puo' allungare. In centesimi, dai dieci centesimi ai
+   cinquanta euro. Sono nove: insieme a «Conta giusti», che ne occupa tre, riempiono
+   esatte tre righe da quattro. Cambiarne il numero vuol dire rifare quel conto
+   in stile.css, altrimenti resta un buco in fondo alla griglia. */
+var TAGLI = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
 
 // Cosa c'e' al primo avvio. Sono valori d'esempio: si cambiano dalla schermata Prodotti.
 var PRODOTTI_ESEMPIO = [
@@ -47,7 +63,12 @@ function statoIniziale() {
     }),
     vendita: { righe: [], contanti: 0 },
     giornata: giornataVuota(),
-    storico: []            // le giornate chiuse, dalla piu' vecchia alla piu' recente
+
+    /* Le giornate chiuse DA QUESTO DISPOSITIVO, dalla piu' vecchia alla piu'
+       recente. Non e' piu' «lo storico»: lo storico completo sta sul server e
+       comprende anche gli altri dispositivi. Qui restano solo i conti miei, che
+       sono quelli che devo mandare, e ognuno sa se e' gia' partito. */
+    mio: []
   };
 }
 
@@ -118,8 +139,14 @@ function carica() {
     };
   }
 
-  if (Array.isArray(letto.storico)) {
-    s.storico = letto.storico.filter(function (g) {
+  /* Le giornate di questo dispositivo. 'storico' e' il nome vecchio, di quando i
+     conti stavano solo qui: se lo si trova si prende lo stesso, segnando tutto come
+     ancora da mandare, cosi' quello che c'era prima del server non si perde. */
+  var mie = Array.isArray(letto.mio) ? letto.mio
+          : (Array.isArray(letto.storico) ? letto.storico : null);
+
+  if (mie) {
+    s.mio = mie.filter(function (g) {
       return g && typeof g.data === 'string' && Number.isFinite(g.incasso);
     }).map(function (g) {
       return {
@@ -127,7 +154,8 @@ function carica() {
         vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
         incasso: g.incasso,
         voci: (g.voci && typeof g.voci === 'object') ? g.voci : {},
-        automatica: !!g.automatica
+        automatica: !!g.automatica,
+        inviata: g.inviata === true
       };
     });
   }
@@ -136,19 +164,20 @@ function carica() {
      al giorno dopo. Adesso c'e' lo storico, quindi la si recupera li' dentro. */
   if (letto.precedente && typeof letto.precedente === 'object' &&
       typeof letto.precedente.data === 'string' && letto.precedente.incasso > 0) {
-    var gia = s.storico.some(function (g) { return g.data === letto.precedente.data; });
+    var gia = s.mio.some(function (g) { return g.data === letto.precedente.data; });
     if (!gia) {
-      s.storico.push({
+      s.mio.push({
         data: letto.precedente.data,
         vendite: Number.isFinite(letto.precedente.vendite) ? letto.precedente.vendite : 0,
         incasso: letto.precedente.incasso,
         voci: {},
-        automatica: true
+        automatica: true,
+        inviata: false
       });
     }
   }
 
-  s.storico.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+  s.mio.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
 
   return s;
 }
@@ -157,37 +186,51 @@ function salva() {
   try { window.localStorage.setItem(CHIAVE, JSON.stringify(stato)); } catch (e) { /* niente da fare */ }
 }
 
-/* Mette una giornata nello storico. Se quel giorno c'e' gia' (cassa chiusa due volte
-   nello stesso giorno) i conti si sommano invece di creare un doppione. */
+/* Somma le voci di una giornata dentro un'altra: per ogni prodotto, i pezzi e
+   l'incasso. Serve ad archiviare, e serve a mettere insieme quello che hanno fatto
+   dispositivi diversi nello stesso giorno. */
+function sommaVoci(dentro, da) {
+  Object.keys(da || {}).forEach(function (k) {
+    var v = da[k];
+    var d = dentro[k] || { nome: v.nome, qta: 0, somma: 0 };
+    d.nome = v.nome;
+    d.qta += v.qta;
+    d.somma += v.somma;
+    dentro[k] = d;
+  });
+}
+
+/* Mette una giornata fra quelle chiuse da questo dispositivo. Se quel giorno c'e'
+   gia' (cassa chiusa due volte nello stesso giorno) i conti si sommano invece di
+   creare un doppione.
+
+   In tutti e due i casi la riga torna «da mandare»: al server si spedisce sempre
+   il TOTALE del giorno, mai quanto e' cambiato, e quindi il totale nuovo deve
+   ripartire anche se il vecchio era gia' arrivato. */
 function archivia(giornata, automatica) {
   if (!giornata || (giornata.vendite === 0 && giornata.incasso === 0)) { return; }
 
   var esistente = null;
-  stato.storico.forEach(function (g) { if (g.data === giornata.data) { esistente = g; } });
+  stato.mio.forEach(function (g) { if (g.data === giornata.data) { esistente = g; } });
 
   if (esistente) {
     esistente.vendite += giornata.vendite;
     esistente.incasso += giornata.incasso;
-    Object.keys(giornata.voci).forEach(function (k) {
-      var v = giornata.voci[k];
-      var d = esistente.voci[k] || { nome: v.nome, qta: 0, somma: 0 };
-      d.nome = v.nome;
-      d.qta += v.qta;
-      d.somma += v.somma;
-      esistente.voci[k] = d;
-    });
+    sommaVoci(esistente.voci, giornata.voci);
     if (!automatica) { esistente.automatica = false; }
+    esistente.inviata = false;
     return;
   }
 
-  stato.storico.push({
+  stato.mio.push({
     data: giornata.data,
     vendite: giornata.vendite,
     incasso: giornata.incasso,
     voci: giornata.voci,
-    automatica: !!automatica
+    automatica: !!automatica,
+    inviata: false
   });
-  stato.storico.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+  stato.mio.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
 }
 
 /* Se l'app si riapre in un giorno diverso, i totali di ieri non devono sommarsi a quelli
@@ -198,6 +241,290 @@ function allineaGiornata() {
   archivia(stato.giornata, true);
   stato.giornata = giornataVuota();
   salva();
+  spingiCoda();          // una giornata dimenticata parte lo stesso, appena si puo'
+}
+
+// --------------------------------------------------------------- l'anno in corso
+
+/* Da «2026/2027» al primo e all'ultimo giorno buoni. L'anno scolastico comincia il
+   primo settembre e finisce il trentuno agosto dopo.
+
+   Serve da quando non c'e' piu' il pulsante che azzera tutto: senza un limite, a
+   settembre 2027 lo Storico sommerebbe due anni insieme e nessuno se ne
+   accorgerebbe. Gli anni vecchi non spariscono, restano sul server. */
+function estremiAnno(anno) {
+  var a = Number(String(anno).slice(0, 4));
+  return { dal: a + '-09-01', al: (a + 1) + '-08-31' };
+}
+
+function annoCorrente() { return annoScolastico(oggi()); }
+
+// --------------------------------------------------------------- le giornate di tutti
+
+/* Lo Storico come si vede: le giornate del server, cioe' di tutti i dispositivi,
+   piu' le mie. Le mie vincono sulla copia che ne ha il server, perche' potrebbero
+   essere cambiate da poco e non essere ancora partite.
+
+   Il risultato e' una riga per giorno, coi conti del bar sommati. Chi ha battuto
+   cosa resta scritto sul server: qui serve sapere quanto ha fatto la scuola. */
+function giornateUnite(dal, al) {
+  var per_data = {};
+  var mio_codice = window.Sincronia.dispositivo();
+
+  var mie_date = {};
+  stato.mio.forEach(function (g) { mie_date[g.data] = true; });
+
+  function aggiungi(g, non_inviata) {
+    if (dal && g.data < dal) { return; }
+    if (al && g.data > al) { return; }
+
+    var d = per_data[g.data];
+    if (!d) {
+      d = per_data[g.data] = {
+        data: g.data, vendite: 0, incasso: 0, voci: {},
+        automatica: false, da_inviare: false
+      };
+    }
+    d.vendite += g.vendite;
+    d.incasso += g.incasso;
+    d.automatica = d.automatica || !!g.automatica;
+    d.da_inviare = d.da_inviare || !!non_inviata;
+    sommaVoci(d.voci, g.voci);
+  }
+
+  window.Sincronia.giornate().forEach(function (g) {
+    // La mia riga la prendo da qui sotto, che e' piu' fresca. Ma solo se ce l'ho
+    // davvero: se la memoria di questo browser e' stata svuotata, quella del
+    // server e' l'unica rimasta e non va buttata via.
+    if (g.dispositivo === mio_codice && mie_date[g.data]) { return; }
+    aggiungi(g, false);
+  });
+
+  stato.mio.forEach(function (g) { aggiungi(g, !g.inviata); });
+
+  return Object.keys(per_data).sort().map(function (k) { return per_data[k]; });
+}
+
+function giornateDellAnno() {
+  var e = estremiAnno(annoCorrente());
+  return giornateUnite(e.dal, e.al);
+}
+
+// Le righe che gli ALTRI dispositivi hanno mandato per un certo giorno.
+function giornateAltrui(data) {
+  var mio_codice = window.Sincronia.dispositivo();
+  return window.Sincronia.giornate().filter(function (g) {
+    return g.data === data && g.dispositivo !== mio_codice;
+  });
+}
+
+// --------------------------------------------------------------- la coda d'invio
+
+var invio_in_corso = false;
+var coda_da_rifare = false;
+
+/* Le giornate mie che non sono ancora arrivate al server. Si riprova a ogni giro di
+   controllo e a ogni rientro nell'app: chiudere la cassa senza rete non deve far
+   perdere niente, e infatti non lo fa - i conti restano qui e partono da soli.
+
+   Se qualcuno chiede di spingere mentre un tentativo e' ancora per aria - succede
+   quando la rete torna proprio mentre quello di prima sta scadendo - la richiesta
+   non si butta via: si rifa' appena l'altro ha finito. Una giornata che aspetta e'
+   l'unica cosa qui dentro che non deve restare indietro. */
+function spingiCoda() {
+  if (!window.Sincronia.configurato()) { return Promise.resolve(); }
+  if (invio_in_corso) { coda_da_rifare = true; return Promise.resolve(); }
+
+  var rimaste = stato.mio.filter(function (g) { return !g.inviata; });
+  if (rimaste.length === 0) { return Promise.resolve(); }
+
+  invio_in_corso = true;
+
+  return rimaste.reduce(function (catena, g) {
+    return catena.then(function () {
+      return window.Sincronia.mandaGiornata(g).then(function () {
+        g.inviata = true;
+        salva();
+      });
+    });
+  }, Promise.resolve()).catch(function () {
+    // Linea persa a meta': quelle che restano riprovano al giro dopo.
+  }).then(function () {
+    invio_in_corso = false;
+    if (!coda_da_rifare) { return; }
+    coda_da_rifare = false;
+    return spingiCoda();
+  });
+}
+
+/* Il listino del server vince su quello locale: e' uno solo per tutti, e chi non ha
+   il permesso non ha modo di cambiarlo. Non si tocca mentre una riga e' aperta in
+   modifica, altrimenti sparirebbe da sotto le dita di chi sta scrivendo. */
+function adottaProdotti() {
+  var dal_server = window.Sincronia.prodotti();
+  if (!dal_server || !Array.isArray(dal_server.elenco)) { return false; }
+  if (document.querySelector('#elenco-prodotti li.in-modifica')) { return false; }
+
+  var nuovo = dal_server.elenco.map(function (p) {
+    return { id: p.id, nome: p.nome, prezzo: p.prezzo };
+  });
+  if (JSON.stringify(nuovo) === JSON.stringify(stato.prodotti)) { return false; }
+
+  stato.prodotti = nuovo;
+  // Le righe della vendita aperta che puntano a un prodotto sparito si tolgono.
+  stato.vendita.righe = stato.vendita.righe.filter(function (r) { return prodottoCon(r.id) !== null; });
+  salva();
+  return true;
+}
+
+function copiaProdotti() {
+  return stato.prodotti.map(function (p) {
+    return { id: p.id, nome: p.nome, prezzo: p.prezzo };
+  });
+}
+
+/* Il listino non e' roba di questo dispositivo: e' di tutti. Quindi non basta
+   salvarlo qui, va mandato al server - ed e' il server a decidere se questo
+   dispositivo puo' farlo.
+
+   Se dice di no, o se la linea cade, si rimette esattamente quello che c'era prima.
+   Meglio nessuna modifica che due dispositivi con due listini diversi, perche' due
+   listini diversi vogliono dire due prezzi diversi allo stesso banco. */
+function salvaProdotti(prima) {
+  salva();
+  disegnaProdotti();
+
+  if (!window.Sincronia.configurato()) { return; }
+
+  window.Sincronia.mandaProdotti(stato.prodotti).then(function () {
+    return window.Sincronia.aggiorna();
+  }).then(function () {
+    adottaProdotti();
+    disegnaProdotti();
+  }, function (e) {
+    stato.prodotti = prima;
+    stato.vendita.righe = stato.vendita.righe.filter(function (r) { return prodottoCon(r.id) !== null; });
+    salva();
+    disegnaProdotti();
+    window.alert('Il listino non è stato cambiato: ' + (e.message || 'il server non risponde.'));
+  });
+}
+
+/* Una riga sola, tenue, che dice come sta il collegamento. Non deve gridare, ma non
+   deve nemmeno mancare: senza, non si saprebbe mai se i conti sono arrivati. */
+function descriviRete(nodo) {
+  if (!nodo) { return; }
+  nodo.className = 'stato-rete';
+
+  if (!window.Sincronia.configurato()) {
+    nodo.textContent = 'Server non impostato: i conti restano su questo dispositivo, ' +
+      'non si vedono altrove, e da qui si può cambiare tutto. È l’app di prima. ' +
+      'Per collegare i dispositivi si scrive l’indirizzo del server in sincronia.js.';
+    return;
+  }
+
+  var in_coda = stato.mio.filter(function (g) { return !g.inviata; }).length;
+
+  if (!window.Sincronia.collegato()) {
+    nodo.classList.add('attenzione');
+    nodo.textContent = 'Senza collegamento: qui vedi solo questo dispositivo. ' +
+      (in_coda > 0
+        ? (in_coda === 1
+          ? 'Una giornata è al sicuro qui e partirà da sola appena torna la rete.'
+          : in_coda + ' giornate sono al sicuro qui e partiranno da sole appena torna la rete.')
+        : 'I conti sono al sicuro qui.');
+    return;
+  }
+
+  if (in_coda > 0) {
+    nodo.classList.add('attenzione');
+    nodo.textContent = 'Sto mandando ' + in_coda +
+      (in_coda === 1 ? ' giornata' : ' giornate') + ' al server.';
+    return;
+  }
+
+  var q = window.Sincronia.quando();
+  var ora = q ? new Date(q) : null;
+  nodo.textContent = 'Collegato' +
+    (ora ? ', ultimo controllo alle ' + String(ora.getHours()).padStart(2, '0') + ':' +
+           String(ora.getMinutes()).padStart(2, '0') : '') +
+    '. Questo dispositivo può ' +
+    (window.Sincronia.puoModificare() ? 'modificare Storico e Prodotti.' : 'solo guardare Storico e Prodotti.');
+}
+
+// --------------------------------------------------------------- il lucchetto
+
+function impronta(testo) {
+  var byte = new TextEncoder().encode(testo);
+  return window.crypto.subtle.digest('SHA-256', byte).then(function (somma) {
+    return Array.prototype.map.call(new Uint8Array(somma), function (b) {
+      return b.toString(16).padStart(2, '0');
+    }).join('');
+  });
+}
+
+var tentativi_sbagliati = 0;
+var dopo_il_lucchetto = null;
+
+/* Chiede la password e va avanti solo se e' giusta. Serve due volte: per entrare
+   nell'app e per chiudere la cassa. E' una schermata dentro la pagina e non una
+   finestra del sistema, perche' dentro un'app installata su telefono quelle a volte
+   non compaiono affatto - e una cassa che non si chiude e' un guaio. */
+/* Coprire lo schermo non basta: col tasto Tab si arriverebbe lo stesso ai pulsanti
+   che stanno sotto, e il lucchetto sarebbe aggirabile senza sapere niente. 'inert'
+   spegne davvero quello che c'e' dietro - clic, tastiera e lettori di schermo. */
+function sfondoInerte(si) {
+  ['header', 'main'].forEach(function (sel) {
+    var n = document.querySelector(sel);
+    if (!n) { return; }
+    if (si) { n.setAttribute('inert', ''); } else { n.removeAttribute('inert'); }
+  });
+}
+
+function chiediPassword(opzioni, poi) {
+  sfondoInerte(true);
+  $('#lucchetto-titolo').textContent = opzioni.titolo;
+  $('#lucchetto-invito').textContent = opzioni.invito;
+  $('#lucchetto-ok').textContent = opzioni.pulsante;
+  $('#lucchetto-lascia').hidden = !opzioni.annullabile;
+
+  var campo = $('#lucchetto-campo');
+  campo.value = '';
+  $('#lucchetto-errore').hidden = true;
+  $('#lucchetto').hidden = false;
+
+  dopo_il_lucchetto = poi;
+  window.setTimeout(function () { campo.focus(); }, 60);
+}
+
+function chiudiLucchetto() {
+  $('#lucchetto').hidden = true;
+  $('#lucchetto-campo').value = '';
+  dopo_il_lucchetto = null;
+  sfondoInerte(false);
+}
+
+/* Dopo qualche tentativo sbagliato si aspetta. Non ferma nessuno per sempre: toglie
+   la voglia di provarle tutte una dopo l'altra. */
+function fermaPer(secondi) {
+  var ok = $('#lucchetto-ok');
+  var errore = $('#lucchetto-errore');
+  ok.disabled = true;
+
+  var restano = secondi;
+  var tic = window.setInterval(function () {
+    restano -= 1;
+    if (restano > 0) {
+      mostraErrore(errore, 'Troppi tentativi. Riprova fra ' + restano + ' second' +
+                   (restano === 1 ? 'o' : 'i') + '.');
+      return;
+    }
+    window.clearInterval(tic);
+    ok.disabled = false;
+    mostraErrore(errore, 'Riprova.');
+  }, 1000);
+
+  mostraErrore(errore, 'Troppi tentativi. Riprova fra ' + restano + ' secondi.');
 }
 
 // --------------------------------------------------------------- numeri
@@ -378,23 +705,54 @@ function disegnaGiornata() {
   var parti = g.data.split('-');
   $('#data-oggi').textContent = 'Oggi è il ' + parti[2] + '/' + parti[1] + '/' + parti[0] + '.';
 
-  $('#incasso-oggi').textContent = euro(g.incasso);
-  $('#vendite-oggi').textContent = String(g.vendite);
+  /* Quanto ha fatto QUESTO dispositivo oggi: la cassa aperta adesso piu' quello che
+     ha gia' archiviato oggi, se la cassa era gia' stata chiusa una volta. */
+  var mio = { vendite: g.vendite, incasso: g.incasso, voci: {} };
+  sommaVoci(mio.voci, g.voci);
+  stato.mio.forEach(function (x) {
+    if (x.data !== g.data) { return; }
+    mio.vendite += x.vendite;
+    mio.incasso += x.incasso;
+    sommaVoci(mio.voci, x.voci);
+  });
 
-  var chiavi = Object.keys(g.voci);
-  var pezzi_totali = riempiTabella($('#tabella-pezzi').querySelector('tbody'), g.voci);
+  // Quanto ha fatto il BAR oggi: il mio piu' quello degli altri dispositivi.
+  var tutti = { vendite: mio.vendite, incasso: mio.incasso, voci: {} };
+  sommaVoci(tutti.voci, mio.voci);
+
+  var altri = giornateAltrui(g.data);
+  altri.forEach(function (x) {
+    tutti.vendite += x.vendite;
+    tutti.incasso += x.incasso;
+    sommaVoci(tutti.voci, x.voci);
+  });
+
+  $('#incasso-oggi').textContent = euro(tutti.incasso);
+  $('#vendite-oggi').textContent = String(tutti.vendite);
+
+  /* La riga piccola compare solo quando c'e' davvero qualcun altro: se batte cassa
+     un dispositivo solo, ripetere due volte lo stesso numero confonde e basta. */
+  $('#incasso-mio').textContent = altri.length > 0
+    ? 'di cui su questo dispositivo ' + euro(mio.incasso)
+    : '';
+
+  var chiavi = Object.keys(tutti.voci);
+  var pezzi_totali = riempiTabella($('#tabella-pezzi').querySelector('tbody'), tutti.voci);
 
   $('#pezzi-oggi').textContent = String(pezzi_totali);
   $('#tabella-pezzi').hidden = chiavi.length === 0;
   $('#giornata-vuota').hidden = chiavi.length > 0;
+
+  // Si chiude la propria giornata, non quella degli altri.
   $('#chiudi-cassa').disabled = g.vendite === 0;
+  descriviRete($('#stato-giornata'));
 
   /* Se una giornata e' finita nello storico senza che la cassa fosse chiusa a mano,
      qui lo si dice. Sparisce da solo appena si registra la prima vendita di oggi. */
   var vecchio = document.getElementById('avviso-precedente');
   if (vecchio) { vecchio.remove(); }
 
-  var ultimo = stato.storico.length ? stato.storico[stato.storico.length - 1] : null;
+  var ultimo = stato.mio.length ? stato.mio[stato.mio.length - 1] : null;
   if (ultimo && ultimo.automatica && ultimo.data !== oggi() && g.vendite === 0) {
     var avviso = document.createElement('p');
     avviso.id = 'avviso-precedente';
@@ -435,8 +793,8 @@ function riempiTabella(corpo, voci) {
 
 // --------------------------------------------------------------- storico
 
-function totaliAnno() {
-  return stato.storico.reduce(function (t, g) {
+function totaliAnno(giorni) {
+  return giorni.reduce(function (t, g) {
     t.incasso += g.incasso;
     t.vendite += g.vendite;
     t.pezzi += pezziDelGiorno(g);
@@ -470,9 +828,20 @@ function rigaGiorno(g) {
     data.appendChild(nota);
   }
 
+  /* Chiusa senza rete: sta al sicuro qui e deve ancora arrivare agli altri. Se il
+     server non e' nemmeno impostato la nota non ha senso e non compare: non c'e'
+     nessun posto dove doveva andare. */
+  if (g.da_inviare && window.Sincronia.configurato()) {
+    var coda = document.createElement('span');
+    coda.className = 'giorno-nota';
+    coda.textContent = 'non ancora mandata al server';
+    data.appendChild(coda);
+  }
+
+  var quanti = pezziDelGiorno(g);
   var pezzi = document.createElement('span');
   pezzi.className = 'giorno-pezzi';
-  pezzi.textContent = pezziDelGiorno(g) + ' pezzi';
+  pezzi.textContent = quanti + (quanti === 1 ? ' pezzo' : ' pezzi');
 
   var cifra = document.createElement('span');
   cifra.className = 'giorno-cifra';
@@ -516,51 +885,72 @@ function corpoGiorno(g) {
     ' · incasso ' + euro(g.incasso);
   box.appendChild(riga);
 
-  /* Il pulsante sta qui dentro e non sulla riga chiusa: per cancellare una giornata
+  /* Il pulsante si costruisce SOLO se il server dice che questo dispositivo puo'
+     modificare. Su tutti gli altri non esiste dentro la pagina: non e' nascosto,
+     non c'e' proprio. E se anche qualcuno lo facesse comparire a forza, il server
+     rifiuterebbe lo stesso - il controllo vero e' li', non qui.
+
+     Sta dentro il giorno aperto e non sulla riga chiusa: per togliere una giornata
      bisogna prima averla aperta, cioe' aver visto cosa contiene. */
-  var elimina = document.createElement('button');
-  elimina.type = 'button';
-  elimina.className = 'btn btn-elimina-giorno';
-  elimina.dataset.eliminaGiorno = g.data;
-  elimina.textContent = 'Elimina questa giornata';
-  box.appendChild(elimina);
+  if (window.Sincronia.puoModificare()) {
+    var elimina = document.createElement('button');
+    elimina.type = 'button';
+    elimina.className = 'btn btn-elimina-giorno';
+    elimina.dataset.eliminaGiorno = g.data;
+    elimina.textContent = 'Togli questa giornata dai conti';
+    box.appendChild(elimina);
+  }
 
   return box;
 }
 
 /* Serve a togliere le prove: una giornata finta lasciata dentro si sommerebbe agli
-   incassi veri fino alla fine dell'anno. */
+   incassi veri fino alla fine dell'anno.
+
+   Sul server non cancella niente: ci mette un segno sopra, e la giornata esce dai
+   conti restando in tabella. E' la ragione per cui adesso la conferma non dice piu'
+   «non si torna indietro»: non e' vero, e prometterlo sarebbe la cosa sbagliata da
+   scrivere sotto un pulsante. */
 function eliminaGiorno(data) {
+  if (!window.Sincronia.puoModificare()) { return; }
+
   var g = null;
-  stato.storico.forEach(function (x) { if (x.data === data) { g = x; } });
+  giornateDellAnno().forEach(function (x) { if (x.data === data) { g = x; } });
   if (!g) { return; }
 
   var quante = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite');
-  if (!window.confirm('Elimino la giornata di ' + dataLunga(data) + '?\n\n' +
-      euro(g.incasso) + ' in ' + quante + ' escono dai conti dell\'anno.\n\n' +
-      'Non si torna indietro.')) { return; }
+  if (!window.confirm('Tolgo dai conti la giornata di ' + dataLunga(data) + '?\n\n' +
+      euro(g.incasso) + ' in ' + quante + ' escono dai totali dell\'anno, su tutti i ' +
+      'dispositivi.\n\nSul server la giornata resta scritta e si può rimettere.')) { return; }
 
-  stato.storico = stato.storico.filter(function (x) { return x.data !== data; });
-  salva();
-  disegnaStorico();
+  window.Sincronia.annulla(data).then(function () {
+    stato.mio = stato.mio.filter(function (x) { return x.data !== data; });
+    salva();
+    return window.Sincronia.aggiorna();
+  }).then(disegnaStorico, function (e) {
+    disegnaStorico();
+    window.alert('La giornata non è stata tolta: ' + (e.message || 'il server non risponde.'));
+  });
 }
 
 function disegnaStorico() {
   var elenco = $('#elenco-giorni');
   elenco.textContent = '';
 
-  var giorni = stato.storico;
-  var t = totaliAnno();
-  var riferimento = giorni.length ? giorni[0].data : oggi();
+  /* Solo l'anno scolastico in corso. Prima il titolo si ricavava dalla prima
+     giornata mai archiviata: adesso che non c'e' piu' un azzeramento di fine anno,
+     quel modo avrebbe tenuto insieme anni diversi per sempre. */
+  var giorni = giornateDellAnno();
+  var t = totaliAnno(giorni);
 
-  $('#titolo-anno').textContent = 'Anno scolastico ' + annoScolastico(riferimento);
+  $('#titolo-anno').textContent = 'Anno scolastico ' + annoCorrente();
   $('#incasso-anno').textContent = euro(t.incasso);
   $('#giorni-anno').textContent = String(giorni.length);
   $('#vendite-anno').textContent = String(t.vendite);
 
   $('#storico-vuoto').hidden = giorni.length > 0;
   $('#scarica-anno').disabled = giorni.length === 0;
-  $('#chiudi-anno').disabled = giorni.length === 0;
+  descriviRete($('#stato-storico'));
 
   giorni.forEach(function (g) { elenco.appendChild(rigaGiorno(g)); });
 }
@@ -579,7 +969,7 @@ function apriChiudiGiorno(li) {
 
   if (!corpo) {
     var g = null;
-    stato.storico.forEach(function (x) { if (x.data === li.dataset.data) { g = x; } });
+    giornateDellAnno().forEach(function (x) { if (x.data === li.dataset.data) { g = x; } });
     if (!g) { return; }
     li.appendChild(corpoGiorno(g));
   } else {
@@ -596,9 +986,9 @@ function virgola(centesimi) {
 /* Un foglio che si apre con Excel o LibreOffice. Punto e virgola come separatore e
    virgola nei decimali: e' quello che si aspetta un foglio di calcolo italiano. */
 function riepilogoAnno() {
-  var giorni = stato.storico;
-  var t = totaliAnno();
-  var anno = annoScolastico(giorni.length ? giorni[0].data : oggi());
+  var giorni = giornateDellAnno();
+  var t = totaliAnno(giorni);
+  var anno = annoCorrente();
   var r = [];
 
   r.push('Bar scolastico - riepilogo anno ' + anno);
@@ -626,10 +1016,9 @@ function riepilogoAnno() {
 }
 
 function scaricaRiepilogo() {
-  var giorni = stato.storico;
-  if (giorni.length === 0) { return; }
+  if (giornateDellAnno().length === 0) { return; }
 
-  var anno = annoScolastico(giorni[0].data).replace('/', '-');
+  var anno = annoCorrente().replace('/', '-');
   var nome = 'bar-scolastico-' + anno + '.csv';
 
   // Il segno iniziale dice a Excel che il file e' in UTF-8: senza, le accentate si rompono.
@@ -649,10 +1038,25 @@ function disegnaProdotti() {
   var elenco = $('#elenco-prodotti');
   elenco.textContent = '';
 
+  /* La domanda che decide tutta questa schermata. Se il server dice di no, i
+     pulsanti non vengono costruiti: sul dispositivo di uno studente non sono
+     nascosti, non esistono proprio dentro la pagina. */
+  var puoi = window.Sincronia.puoModificare();
+
+  $('#form-prodotto').hidden = !puoi;
+  $('#codice-dispositivo').textContent = window.Sincronia.dispositivo();
+  descriviRete($('#stato-prodotti'));
+
+  $('#spiega-prodotti').textContent = puoi
+    ? 'I prezzi si scrivono con la virgola: 1,50. Le modifiche valgono subito e arrivano da sole su tutti gli altri dispositivi.'
+    : 'Questo dispositivo può vedere il listino ma non cambiarlo. I prezzi si modificano da un dispositivo autorizzato, e la modifica arriva qui da sola.';
+
   if (stato.prodotti.length === 0) {
     var vuoto = document.createElement('li');
     vuoto.className = 'nota-vuota';
-    vuoto.textContent = 'Nessun prodotto: aggiungine uno qui sotto.';
+    vuoto.textContent = puoi
+      ? 'Nessun prodotto: aggiungine uno qui sotto.'
+      : 'Nessun prodotto nel listino.';
     elenco.appendChild(vuoto);
     return;
   }
@@ -668,6 +1072,12 @@ function disegnaProdotti() {
     var prezzo = document.createElement('span');
     prezzo.className = 'voce-prezzo';
     prezzo.textContent = euro(p.prezzo);
+
+    if (!puoi) {
+      li.appendChild(nome); li.appendChild(prezzo);
+      elenco.appendChild(li);
+      return;
+    }
 
     var su = document.createElement('button');
     su.type = 'button'; su.className = 'mini'; su.dataset.su = p.id;
@@ -783,15 +1193,12 @@ function incassa() {
 
 // --------------------------------------------------------------- schede
 
-var prodotti_gia_sbloccati = false;
-
+/* Su «Prodotti» c'era una domanda di conferma, perche' era l'unica cosa che
+   tenesse fuori chi non doveva entrarci. Adesso non serve piu': chi non ha il
+   permesso vede il listino e non trova niente da premere, e il server rifiuta le
+   modifiche comunque. Una conferma che non protegge da niente si impara a premere
+   senza leggerla, ed e' peggio di non averla. */
 function vaiA(nome) {
-  if (nome === 'prodotti' && !prodotti_gia_sbloccati) {
-    var ok = window.confirm('Stai per cambiare i prodotti e i prezzi della cassa. Vuoi continuare?');
-    if (!ok) { return; }
-    prodotti_gia_sbloccati = true;
-  }
-
   ['cassa', 'giornata', 'storico', 'prodotti'].forEach(function (n) {
     document.getElementById('schermata-' + n).hidden = (n !== nome);
   });
@@ -873,16 +1280,27 @@ function collegaEventi() {
 
   $('#incassa').addEventListener('click', incassa);
 
+  /* Chiudere la cassa vuol dire mettere via l'incasso di una giornata: chiede la
+     password, cosi' non succede per un tocco sbagliato mentre c'e' la fila. La
+     password la sanno tutti quelli che usano l'app - il suo mestiere qui e' fermare
+     la mano, non riconoscere chi la muove. */
   $('#chiudi-cassa').addEventListener('click', function () {
-    var quanto = euro(stato.giornata.incasso);
-    if (!window.confirm('Chiudo la cassa di oggi?\n\nIncasso: ' + quanto +
-        '\n\nLa giornata finisce nello Storico e i totali tornano a zero per domani.')) { return; }
+    if (stato.giornata.vendite === 0) { return; }
 
-    archivia(stato.giornata, false);
-    stato.giornata = giornataVuota();
-    salva();
-    disegnaGiornata();
-    vaiA('storico');       // subito il riepilogo di quello che si e' appena chiuso
+    chiediPassword({
+      titolo: 'Chiudi la cassa',
+      invito: 'Incasso di oggi su questo dispositivo: ' + euro(stato.giornata.incasso) +
+        '. La giornata finisce nello Storico e i totali tornano a zero per domani.',
+      pulsante: 'Chiudi la cassa',
+      annullabile: true
+    }, function () {
+      archivia(stato.giornata, false);
+      stato.giornata = giornataVuota();
+      salva();
+      spingiCoda();
+      disegnaGiornata();
+      vaiA('storico');     // subito il riepilogo di quello che si e' appena chiuso
+    });
   });
 
   $('#elenco-giorni').addEventListener('click', function (e) {
@@ -895,26 +1313,11 @@ function collegaEventi() {
 
   $('#scarica-anno').addEventListener('click', scaricaRiepilogo);
 
-  /* Azzerare l'anno cancella l'unica traccia dei soldi della scuola: due conferme, e la
-     seconda dice per esteso che cosa sparisce. */
-  $('#chiudi-anno').addEventListener('click', function () {
-    var t = totaliAnno();
-    var n = stato.storico.length;
-    if (n === 0) { return; }
-
-    var anno = annoScolastico(stato.storico[0].data);
-
-    if (!window.confirm('Comincio un anno nuovo?\n\nAnno ' + anno + ': ' + n +
-        ' giorni, ' + euro(t.incasso) + ' incassati.\n\n' +
-        'Hai scaricato il riepilogo? Dopo non si recupera.')) { return; }
-
-    if (!window.confirm('Ultima conferma.\n\nSto per cancellare tutti i ' + n +
-        ' giorni dell\'anno ' + anno + '. I prodotti e i prezzi restano.')) { return; }
-
-    stato.storico = [];
-    salva();
-    disegnaStorico();
-  });
+  /* Qui c'era «Azzera e comincia un anno nuovo». Tolto l'8 settembre 2026: era il
+     solo pulsante capace di distruggere in un colpo l'intera traccia dei soldi della
+     scuola, e serviva una volta l'anno. Adesso lo Storico mostra da solo il solo
+     anno in corso, e gli anni vecchi restano sul server senza che nessuno debba
+     premere niente per farli sparire. */
 
   $('#elenco-prodotti').addEventListener('click', function (e) {
     var b = e.target.closest('button');
@@ -924,9 +1327,10 @@ function collegaEventi() {
       var p = prodottoCon(b.dataset.elimina);
       if (!p) { return; }
       if (!window.confirm('Elimino «' + p.nome + '» dalla cassa?')) { return; }
+      var prima_elimina = copiaProdotti();
       stato.prodotti = stato.prodotti.filter(function (x) { return x.id !== p.id; });
       stato.vendita.righe = stato.vendita.righe.filter(function (r) { return r.id !== p.id; });
-      salva(); disegnaProdotti();
+      salvaProdotti(prima_elimina);
       return;
     }
 
@@ -936,10 +1340,11 @@ function collegaEventi() {
       var i = stato.prodotti.findIndex(function (x) { return x.id === id; });
       var j = i + passo;
       if (i < 0 || j < 0 || j >= stato.prodotti.length) { return; }
+      var prima_sposta = copiaProdotti();
       var appoggio = stato.prodotti[i];
       stato.prodotti[i] = stato.prodotti[j];
       stato.prodotti[j] = appoggio;
-      salva(); disegnaProdotti();
+      salvaProdotti(prima_sposta);
       return;
     }
 
@@ -956,13 +1361,48 @@ function collegaEventi() {
     if (prezzo === null) { mostraErrore(errore, 'Il prezzo non va bene. Scrivilo così: 1,20'); return; }
 
     errore.hidden = true;
+    var prima = copiaProdotti();
     stato.prodotti.push({ id: nuovoId(), nome: nome, prezzo: prezzo });
-    salva();
     $('#nuovo-nome').value = '';
     $('#nuovo-prezzo').value = '';
     $('#nuovo-nome').focus();
-    disegnaProdotti();
+    salvaProdotti(prima);
   });
+
+  // --------------------------------------------------------- il lucchetto
+
+  $('#form-lucchetto').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    var campo = $('#lucchetto-campo');
+    var errore = $('#lucchetto-errore');
+    if ($('#lucchetto-ok').disabled) { return; }
+
+    impronta(campo.value).then(function (imp) {
+      if (imp === IMPRONTA_PASSWORD) {
+        tentativi_sbagliati = 0;
+        var poi = dopo_il_lucchetto;
+        chiudiLucchetto();
+        if (poi) { poi(); }
+        return;
+      }
+
+      tentativi_sbagliati += 1;
+      campo.value = '';
+      mostraErrore(errore, 'Password sbagliata.');
+
+      var pausa = Math.min(30, (tentativi_sbagliati - 2) * 5);
+      if (pausa > 0) { fermaPer(pausa); }
+    }).catch(function () {
+      /* Succede se la pagina non e' aperta ne' in https ne' su localhost: il
+         browser li' non presta il pezzo che serve a controllare la password. */
+      mostraErrore(errore, 'Non riesco a controllare la password: apri l’app dal suo ' +
+        'indirizzo, non con un doppio clic sul file.');
+    });
+  });
+
+  // Solo per la chiusura di cassa: dall'ingresso non si torna indietro.
+  $('#lucchetto-lascia').addEventListener('click', chiudiLucchetto);
 }
 
 function mostraErrore(nodo, testo) {
@@ -1005,10 +1445,10 @@ function apriModifica(id) {
       prezzo.style.borderColor = 'var(--rosso)';
       return;
     }
+    var prima = copiaProdotti();
     p.nome = n;
     p.prezzo = c;
-    salva();
-    disegnaProdotti();
+    salvaProdotti(prima);
   });
 
   annullaBtn.addEventListener('click', disegnaProdotti);
@@ -1060,13 +1500,46 @@ function collegaServiceWorker() {
   });
 }
 
-function avvia() {
-  stato = carica();
-  allineaGiornata();
-  costruisciTagli();
-  collegaEventi();
+/* Ridisegna solo la schermata che si sta guardando davvero. Serve quando arrivano
+   notizie dal server: un prezzo cambiato altrove, una giornata mandata da un altro
+   dispositivo. Le schermate nascoste si ridisegnano da sole quando si aprono. */
+function ridisegnaQuelloCheSiVede() {
+  if (!document.getElementById('schermata-cassa').hidden) { disegnaTutto(); }
+  if (!document.getElementById('schermata-giornata').hidden) { disegnaGiornata(); }
+  if (!document.getElementById('schermata-storico').hidden) { disegnaStorico(); }
+
+  /* Prodotti no, se una riga e' aperta in modifica: ridisegnarla mentre qualcuno
+     sta scrivendo un prezzo vuol dire cancellargli quello che ha scritto. */
+  if (!document.getElementById('schermata-prodotti').hidden &&
+      !document.querySelector('#elenco-prodotti li.in-modifica')) {
+    disegnaProdotti();
+  }
+}
+
+function arrivanoNotizie() {
+  var listino_cambiato = adottaProdotti();
+  spingiCoda();
+
+  /* Il primo dispositivo autorizzato che si collega porta sul server il listino che
+     ha in casa. Senza questo il server resterebbe senza prodotti finche' non se ne
+     cambia uno a mano, e gli altri dispositivi vedrebbero una cassa vuota. */
+  if (!window.Sincronia.prodotti() && window.Sincronia.puoModificare() &&
+      stato.prodotti.length > 0) {
+    window.Sincronia.mandaProdotti(stato.prodotti).catch(function () { /* al giro dopo */ });
+  }
+
+  if (listino_cambiato) { disegnaTutto(); }
+  ridisegnaQuelloCheSiVede();
+}
+
+// Quello che succede dopo che la password e' stata accettata.
+function entra() {
   disegnaTutto();
-  collegaServiceWorker();
+
+  var confini = estremiAnno(annoCorrente());
+  window.Sincronia.guarda(confini.dal, confini.al);
+  window.Sincronia.quandoCambia(arrivanoNotizie);
+  window.Sincronia.avvia();
 
   // L'app puo' restare aperta per giorni: al rientro si ricontrolla la data e,
   // se serve, si riprende lo schermo acceso.
@@ -1076,6 +1549,24 @@ function avvia() {
     if (!document.getElementById('schermata-giornata').hidden) { disegnaGiornata(); }
     tieniAccesoLoSchermo();
   });
+}
+
+function avvia() {
+  stato = carica();
+  allineaGiornata();
+  costruisciTagli();
+  collegaEventi();
+  collegaServiceWorker();
+
+  /* Prima il lucchetto, poi tutto il resto. Si chiede a ogni apertura: chi prende in
+     mano il telefono e tocca l'icona non entra. Durante l'intervallo l'app resta
+     aperta, quindi costa una digitazione al giorno per dispositivo. */
+  chiediPassword({
+    titolo: 'Cassa del bar',
+    invito: 'Scrivi la password per entrare.',
+    pulsante: 'Entra',
+    annullabile: false
+  }, entra);
 }
 
 avvia();

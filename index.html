@@ -17,6 +17,22 @@
 </head>
 <body>
 
+<!-- Il lucchetto sta sopra tutto il resto e serve due volte: per entrare nell'app e
+     per chiudere la cassa. Non e' una finestra di sistema perche' dentro un'app
+     installata su telefono quelle a volte non compaiono affatto. -->
+<div class="lucchetto" id="lucchetto">
+  <form class="lucchetto-scatola" id="form-lucchetto">
+    <h2 class="lucchetto-titolo" id="lucchetto-titolo">Cassa del bar</h2>
+    <p class="lucchetto-invito" id="lucchetto-invito">Scrivi la password per entrare.</p>
+    <input class="lucchetto-campo" id="lucchetto-campo" type="password"
+           autocomplete="current-password" autocapitalize="off" autocorrect="off"
+           spellcheck="false" aria-label="Password">
+    <button class="btn btn-incassa" id="lucchetto-ok" type="submit">Entra</button>
+    <button class="btn btn-annulla" id="lucchetto-lascia" type="button" hidden>Lascia stare</button>
+    <p class="errore" id="lucchetto-errore" role="alert" hidden></p>
+  </form>
+</div>
+
 <header class="testata">
   <h1 class="titolo">Cassa del bar</h1>
   <nav class="schede" role="tablist" aria-label="Schermate">
@@ -75,6 +91,7 @@
       <div class="cartellino grande">
         <span class="cartellino-etichetta">Incassato oggi</span>
         <strong class="cartellino-cifra" id="incasso-oggi">0,00&nbsp;€</strong>
+        <span class="cartellino-nota" id="incasso-mio"></span>
       </div>
       <div class="cartellino">
         <span class="cartellino-etichetta">Vendite</span>
@@ -95,7 +112,9 @@
 
     <button class="btn btn-chiudi" id="chiudi-cassa" type="button">Chiudi cassa</button>
     <p class="spiega">«Chiudi cassa» archivia la giornata nello <strong>Storico</strong> e
-      riporta i totali a zero per domani. I prodotti e i prezzi restano.</p>
+      riporta i totali a zero per domani. Chiede la password, così non si chiude per un
+      tocco sbagliato. I prodotti e i prezzi restano.</p>
+    <p class="stato-rete" id="stato-giornata" role="status" aria-live="polite"></p>
   </section>
 
   <!-- -------------------------------------------------------- STORICO -->
@@ -123,12 +142,12 @@
     <p class="nota-vuota" id="storico-vuoto">Nessuna giornata archiviata: compariranno qui
       dopo il primo «Chiudi cassa».</p>
 
-    <h2>Fine anno</h2>
-    <p class="spiega">Prima di azzerare, <strong>scarica il riepilogo</strong>: è l'unica
-      copia dei conti dell'anno, e serve a rendicontare alla scuola. Il file si apre con
-      Excel o LibreOffice.</p>
+    <h2>Il riepilogo</h2>
+    <p class="spiega">Il riepilogo dell'anno in corso, in un foglio che si apre con Excel o
+      LibreOffice: serve a rendicontare alla scuola. Si può scaricare quando si vuole,
+      anche a metà anno, e non cambia niente nei conti.</p>
     <button class="btn btn-scarica" id="scarica-anno" type="button">Scarica il riepilogo dell'anno</button>
-    <button class="btn btn-chiudi" id="chiudi-anno" type="button">Azzera e comincia un anno nuovo</button>
+    <p class="stato-rete" id="stato-storico" role="status" aria-live="polite"></p>
   </section>
 
   <!-- ------------------------------------------------------- PRODOTTI -->
@@ -152,12 +171,20 @@
       <p class="errore" id="errore-prodotto" role="alert" hidden></p>
     </form>
 
-    <p class="spiega">I prezzi si scrivono con la virgola: <code>1,50</code>. Le modifiche
-      valgono subito e restano salvate su questo dispositivo.</p>
+    <p class="spiega" id="spiega-prodotti">I prezzi si scrivono con la virgola:
+      <code>1,50</code>. Le modifiche valgono subito e arrivano da sole su tutti gli altri
+      dispositivi.</p>
+
+    <h2>Questo dispositivo</h2>
+    <p class="spiega">Ogni dispositivo ha un codice suo. È quello che va copiato nel
+      pannello di Cloudflare per dargli il permesso di modificare Storico e Prodotti.</p>
+    <p class="codice-dispositivo" id="codice-dispositivo"></p>
+    <p class="stato-rete" id="stato-prodotti" role="status" aria-live="polite"></p>
   </section>
 
 </main>
 
+<script src="sincronia.js"></script>
 <script src="cassa.js"></script>
 </body>
 </html>

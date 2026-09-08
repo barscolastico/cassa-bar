@@ -271,7 +271,11 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 
 .taglio:active { background: var(--verde-chiaro); border-color: var(--verde); }
-.taglio.esatto { grid-column: span 2; color: var(--verde); border-color: var(--verde); }
+
+/* Nove tagli piu' «Conta giusti» che ne occupa tre: dodici caselle esatte, cioe'
+   tre righe piene su quattro colonne. Se un giorno si aggiunge o si toglie un
+   taglio, questo numero va rifatto, altrimenti resta un buco in fondo. */
+.taglio.esatto { grid-column: span 3; color: var(--verde); border-color: var(--verde); }
 
 .ricevuto {
   color: var(--testo-tenue);
@@ -543,6 +547,85 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* --------------------------------------------------------- lucchetto */
+
+/* Copre tutto: finche' e' su non si vede niente dell'app, nemmeno di sfondo.
+   Serve sia per entrare sia per chiudere la cassa, e cambia solo le scritte. */
+.lucchetto {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--fondo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.lucchetto-scatola {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 20px;
+  border-radius: var(--raggio);
+  background: var(--carta);
+  box-shadow: var(--ombra);
+}
+
+.lucchetto-titolo { margin: 0; font-size: 1.25rem; }
+.lucchetto-invito { margin: 0; color: var(--testo-tenue); line-height: 1.5; }
+
+.lucchetto-campo {
+  min-height: 56px;
+  padding: 0 14px;
+  border: 2px solid var(--bordo);
+  border-radius: 12px;
+  background: var(--fondo);
+}
+
+.lucchetto-campo:focus { outline: 3px solid var(--verde); outline-offset: 1px; border-color: var(--verde); }
+.lucchetto .btn { width: 100%; }
+
+/* --------------------------------------------------------- stato della rete */
+
+/* Una riga sola, tenue: dice se i conti sono arrivati al server. Non deve gridare,
+   ma non deve nemmeno mancare, altrimenti non si sa mai se il collegamento va. */
+.stato-rete {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--carta);
+  border: 1px solid var(--bordo);
+  color: var(--testo-tenue);
+  font-size: .88rem;
+  line-height: 1.45;
+}
+
+.stato-rete.attenzione { border-color: var(--ambra); background: var(--ambra-chiaro); color: var(--ambra); }
+
+.cartellino-nota {
+  display: block;
+  margin-top: 4px;
+  color: var(--testo-tenue);
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+/* Il codice va letto a occhio e ricopiato: carattere a larghezza fissa e
+   spezzabile, altrimenti su telefono esce dallo schermo. */
+.codice-dispositivo {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  background: var(--carta);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: .95rem;
+  overflow-wrap: anywhere;
 }
 
 /* --------------------------------------------------------- schermi larghi */
