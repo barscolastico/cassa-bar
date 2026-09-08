@@ -47,8 +47,34 @@ function statoIniziale() {
     }),
     vendita: { righe: [], contanti: 0 },
     giornata: giornataVuota(),
-    precedente: null
+    storico: []            // le giornate chiuse, dalla piu' vecchia alla piu' recente
   };
+}
+
+var GIORNI_SETTIMANA = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì',
+                        'venerdì', 'sabato'];
+var MESI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio',
+            'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+
+/* Nell'elenco l'anno si omette: sta gia' nel titolo della schermata, e dentro un anno
+   scolastico un «15 settembre» ce n'e' uno solo. Nel file da salvare invece ci va. */
+function dataLunga(iso, con_anno) {
+  var p = iso.split('-');
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  return GIORNI_SETTIMANA[d.getDay()] + ' ' + Number(p[2]) + ' ' + MESI[Number(p[1]) - 1] +
+         (con_anno ? ' ' + p[0] : '');
+}
+
+/* L'anno scolastico non e' quello del calendario: comincia a settembre. Un giorno di
+   gennaio appartiene all'anno cominciato l'autunno prima. */
+function annoScolastico(iso) {
+  var a = Number(iso.slice(0, 4));
+  var m = Number(iso.slice(5, 7));
+  return m >= 9 ? a + '/' + (a + 1) : (a - 1) + '/' + a;
+}
+
+function pezziDelGiorno(g) {
+  return Object.keys(g.voci).reduce(function (n, k) { return n + g.voci[k].qta; }, 0);
 }
 
 /* Rileggere quello che c'e' salvato senza fidarsene: il salvataggio puo' essere
@@ -92,7 +118,37 @@ function carica() {
     };
   }
 
-  if (letto.precedente && typeof letto.precedente === 'object') { s.precedente = letto.precedente; }
+  if (Array.isArray(letto.storico)) {
+    s.storico = letto.storico.filter(function (g) {
+      return g && typeof g.data === 'string' && Number.isFinite(g.incasso);
+    }).map(function (g) {
+      return {
+        data: g.data,
+        vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
+        incasso: g.incasso,
+        voci: (g.voci && typeof g.voci === 'object') ? g.voci : {},
+        automatica: !!g.automatica
+      };
+    });
+  }
+
+  /* Formato vecchio: la giornata non chiusa stava da sola in 'precedente' e si perdeva
+     al giorno dopo. Adesso c'e' lo storico, quindi la si recupera li' dentro. */
+  if (letto.precedente && typeof letto.precedente === 'object' &&
+      typeof letto.precedente.data === 'string' && letto.precedente.incasso > 0) {
+    var gia = s.storico.some(function (g) { return g.data === letto.precedente.data; });
+    if (!gia) {
+      s.storico.push({
+        data: letto.precedente.data,
+        vendite: Number.isFinite(letto.precedente.vendite) ? letto.precedente.vendite : 0,
+        incasso: letto.precedente.incasso,
+        voci: {},
+        automatica: true
+      });
+    }
+  }
+
+  s.storico.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
 
   return s;
 }
@@ -101,18 +157,45 @@ function salva() {
   try { window.localStorage.setItem(CHIAVE, JSON.stringify(stato)); } catch (e) { /* niente da fare */ }
 }
 
-/* Se l'app si riapre in un giorno diverso, i totali di ieri non devono sommarsi a
-   quelli di oggi. Non li si butta in silenzio: restano in 'precedente' e la schermata
-   Giornata lo dice, cosi' un incasso non segnato non sparisce senza avvisare. */
+/* Mette una giornata nello storico. Se quel giorno c'e' gia' (cassa chiusa due volte
+   nello stesso giorno) i conti si sommano invece di creare un doppione. */
+function archivia(giornata, automatica) {
+  if (!giornata || (giornata.vendite === 0 && giornata.incasso === 0)) { return; }
+
+  var esistente = null;
+  stato.storico.forEach(function (g) { if (g.data === giornata.data) { esistente = g; } });
+
+  if (esistente) {
+    esistente.vendite += giornata.vendite;
+    esistente.incasso += giornata.incasso;
+    Object.keys(giornata.voci).forEach(function (k) {
+      var v = giornata.voci[k];
+      var d = esistente.voci[k] || { nome: v.nome, qta: 0, somma: 0 };
+      d.nome = v.nome;
+      d.qta += v.qta;
+      d.somma += v.somma;
+      esistente.voci[k] = d;
+    });
+    if (!automatica) { esistente.automatica = false; }
+    return;
+  }
+
+  stato.storico.push({
+    data: giornata.data,
+    vendite: giornata.vendite,
+    incasso: giornata.incasso,
+    voci: giornata.voci,
+    automatica: !!automatica
+  });
+  stato.storico.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+}
+
+/* Se l'app si riapre in un giorno diverso, i totali di ieri non devono sommarsi a quelli
+   di oggi. Non si buttano: finiscono nello storico segnati come «non chiusa a mano»,
+   cosi' un incasso dimenticato resta comunque contato nell'anno. */
 function allineaGiornata() {
   if (stato.giornata.data === oggi()) { return; }
-  if (stato.giornata.incasso > 0 || stato.giornata.vendite > 0) {
-    stato.precedente = {
-      data: stato.giornata.data,
-      incasso: stato.giornata.incasso,
-      vendite: stato.giornata.vendite
-    };
-  }
+  archivia(stato.giornata, true);
   stato.giornata = giornataVuota();
   salva();
 }
@@ -298,15 +381,41 @@ function disegnaGiornata() {
   $('#incasso-oggi').textContent = euro(g.incasso);
   $('#vendite-oggi').textContent = String(g.vendite);
 
-  var corpo = $('#tabella-pezzi').querySelector('tbody');
-  corpo.textContent = '';
-
   var chiavi = Object.keys(g.voci);
-  var pezzi_totali = 0;
+  var pezzi_totali = riempiTabella($('#tabella-pezzi').querySelector('tbody'), g.voci);
 
-  chiavi.sort(function (a, b) { return g.voci[b].qta - g.voci[a].qta; }).forEach(function (k) {
-    var v = g.voci[k];
-    pezzi_totali += v.qta;
+  $('#pezzi-oggi').textContent = String(pezzi_totali);
+  $('#tabella-pezzi').hidden = chiavi.length === 0;
+  $('#giornata-vuota').hidden = chiavi.length > 0;
+  $('#chiudi-cassa').disabled = g.vendite === 0;
+
+  /* Se una giornata e' finita nello storico senza che la cassa fosse chiusa a mano,
+     qui lo si dice. Sparisce da solo appena si registra la prima vendita di oggi. */
+  var vecchio = document.getElementById('avviso-precedente');
+  if (vecchio) { vecchio.remove(); }
+
+  var ultimo = stato.storico.length ? stato.storico[stato.storico.length - 1] : null;
+  if (ultimo && ultimo.automatica && ultimo.data !== oggi() && g.vendite === 0) {
+    var avviso = document.createElement('p');
+    avviso.id = 'avviso-precedente';
+    avviso.className = 'spiega';
+    avviso.textContent = 'La cassa di ' + dataLunga(ultimo.data) + ' non era stata chiusa: ' +
+      'ho archiviato io ' + euro(ultimo.incasso) + '. La trovi nello Storico.';
+    $('#data-oggi').insertAdjacentElement('afterend', avviso);
+  }
+}
+
+/* Riempie il corpo di una tabella con le voci di una giornata, dal prodotto piu' venduto
+   al meno venduto. Restituisce quanti pezzi in tutto. Serve sia a Giornata sia a Storico. */
+function riempiTabella(corpo, voci) {
+  corpo.textContent = '';
+  var pezzi = 0;
+
+  Object.keys(voci).sort(function (a, b) {
+    return voci[b].qta - voci[a].qta;
+  }).forEach(function (k) {
+    var v = voci[k];
+    pezzi += v.qta;
 
     var tr = document.createElement('tr');
     var td1 = document.createElement('td');
@@ -321,24 +430,193 @@ function disegnaGiornata() {
     corpo.appendChild(tr);
   });
 
-  $('#pezzi-oggi').textContent = String(pezzi_totali);
-  $('#tabella-pezzi').hidden = chiavi.length === 0;
-  $('#giornata-vuota').hidden = chiavi.length > 0;
-  $('#chiudi-cassa').disabled = g.vendite === 0;
+  return pezzi;
+}
 
-  // L'avviso sul giorno prima: compare una volta sola, finche' non si incassa di nuovo.
-  var vecchio = document.getElementById('avviso-precedente');
-  if (vecchio) { vecchio.remove(); }
-  if (stato.precedente && stato.precedente.incasso > 0) {
-    var p = stato.precedente.data.split('-');
-    var avviso = document.createElement('p');
-    avviso.id = 'avviso-precedente';
-    avviso.className = 'spiega';
-    avviso.textContent = 'Il ' + p[2] + '/' + p[1] + ' avevi incassato ' +
-      euro(stato.precedente.incasso) + ' in ' + stato.precedente.vendite +
-      ' vendite. Quel totale è stato azzerato all’apertura di oggi.';
-    $('#data-oggi').insertAdjacentElement('afterend', avviso);
+// --------------------------------------------------------------- storico
+
+function totaliAnno() {
+  return stato.storico.reduce(function (t, g) {
+    t.incasso += g.incasso;
+    t.vendite += g.vendite;
+    t.pezzi += pezziDelGiorno(g);
+    return t;
+  }, { incasso: 0, vendite: 0, pezzi: 0 });
+}
+
+function rigaGiorno(g) {
+  var li = document.createElement('li');
+  li.className = 'giorno';
+  li.dataset.data = g.data;
+
+  var testa = document.createElement('button');
+  testa.type = 'button';
+  testa.className = 'giorno-testa';
+  testa.setAttribute('aria-expanded', 'false');
+
+  var freccia = document.createElement('span');
+  freccia.className = 'giorno-freccia';
+  freccia.setAttribute('aria-hidden', 'true');
+  freccia.textContent = '▸';
+
+  var data = document.createElement('span');
+  data.className = 'giorno-data';
+  data.textContent = dataLunga(g.data);
+
+  if (g.automatica) {
+    var nota = document.createElement('span');
+    nota.className = 'giorno-nota';
+    nota.textContent = 'cassa non chiusa a mano';
+    data.appendChild(nota);
   }
+
+  var pezzi = document.createElement('span');
+  pezzi.className = 'giorno-pezzi';
+  pezzi.textContent = pezziDelGiorno(g) + ' pezzi';
+
+  var cifra = document.createElement('span');
+  cifra.className = 'giorno-cifra';
+  cifra.textContent = euro(g.incasso);
+
+  testa.appendChild(freccia);
+  testa.appendChild(data);
+  testa.appendChild(pezzi);
+  testa.appendChild(cifra);
+  li.appendChild(testa);
+
+  return li;
+}
+
+/* Il dettaglio si costruisce solo quando si apre il giorno: un anno intero sono duecento
+   giorni, e costruire duecento tabelle che nessuno guarda rallenterebbe l'apertura. */
+function corpoGiorno(g) {
+  var box = document.createElement('div');
+  box.className = 'giorno-corpo';
+
+  if (Object.keys(g.voci).length === 0) {
+    var vuoto = document.createElement('p');
+    vuoto.className = 'nota-vuota';
+    vuoto.textContent = 'Di questo giorno è rimasto solo il totale, non il dettaglio dei prodotti.';
+    box.appendChild(vuoto);
+  } else {
+    var tab = document.createElement('table');
+    tab.className = 'tabella';
+    var testa = document.createElement('thead');
+    testa.innerHTML = '<tr><th>Prodotto</th><th class="num">Pezzi</th><th class="num">Incasso</th></tr>';
+    var corpo = document.createElement('tbody');
+    riempiTabella(corpo, g.voci);
+    tab.appendChild(testa);
+    tab.appendChild(corpo);
+    box.appendChild(tab);
+  }
+
+  var riga = document.createElement('p');
+  riga.className = 'spiega';
+  riga.textContent = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
+    ' · incasso ' + euro(g.incasso);
+  box.appendChild(riga);
+
+  return box;
+}
+
+function disegnaStorico() {
+  var elenco = $('#elenco-giorni');
+  elenco.textContent = '';
+
+  var giorni = stato.storico;
+  var t = totaliAnno();
+  var riferimento = giorni.length ? giorni[0].data : oggi();
+
+  $('#titolo-anno').textContent = 'Anno scolastico ' + annoScolastico(riferimento);
+  $('#incasso-anno').textContent = euro(t.incasso);
+  $('#giorni-anno').textContent = String(giorni.length);
+  $('#vendite-anno').textContent = String(t.vendite);
+
+  $('#storico-vuoto').hidden = giorni.length > 0;
+  $('#scarica-anno').disabled = giorni.length === 0;
+  $('#chiudi-anno').disabled = giorni.length === 0;
+
+  giorni.forEach(function (g) { elenco.appendChild(rigaGiorno(g)); });
+}
+
+function apriChiudiGiorno(li) {
+  var testa = li.querySelector('.giorno-testa');
+  var aperto = li.classList.toggle('aperto');
+  testa.setAttribute('aria-expanded', aperto ? 'true' : 'false');
+  li.querySelector('.giorno-freccia').textContent = aperto ? '▾' : '▸';
+
+  var corpo = li.querySelector('.giorno-corpo');
+  if (!aperto) {
+    if (corpo) { corpo.hidden = true; }
+    return;
+  }
+
+  if (!corpo) {
+    var g = null;
+    stato.storico.forEach(function (x) { if (x.data === li.dataset.data) { g = x; } });
+    if (!g) { return; }
+    li.appendChild(corpoGiorno(g));
+  } else {
+    corpo.hidden = false;
+  }
+}
+
+// --------------------------------------------------------------- riepilogo da salvare
+
+function virgola(centesimi) {
+  return (centesimi / 100).toFixed(2).replace('.', ',');
+}
+
+/* Un foglio che si apre con Excel o LibreOffice. Punto e virgola come separatore e
+   virgola nei decimali: e' quello che si aspetta un foglio di calcolo italiano. */
+function riepilogoAnno() {
+  var giorni = stato.storico;
+  var t = totaliAnno();
+  var anno = annoScolastico(giorni.length ? giorni[0].data : oggi());
+  var r = [];
+
+  r.push('Bar scolastico - riepilogo anno ' + anno);
+  r.push('');
+  r.push('Giorno;Data;Vendite;Pezzi;Incasso');
+
+  giorni.forEach(function (g) {
+    r.push(dataLunga(g.data, true) + ';' + g.data + ';' + g.vendite + ';' +
+           pezziDelGiorno(g) + ';' + virgola(g.incasso));
+  });
+
+  r.push('TOTALE;;' + t.vendite + ';' + t.pezzi + ';' + virgola(t.incasso));
+  r.push('');
+  r.push('Dettaglio per prodotto');
+  r.push('Data;Prodotto;Pezzi;Incasso');
+
+  giorni.forEach(function (g) {
+    Object.keys(g.voci).forEach(function (k) {
+      var v = g.voci[k];
+      r.push(g.data + ';' + v.nome + ';' + v.qta + ';' + virgola(v.somma));
+    });
+  });
+
+  return r.join('\r\n');
+}
+
+function scaricaRiepilogo() {
+  var giorni = stato.storico;
+  if (giorni.length === 0) { return; }
+
+  var anno = annoScolastico(giorni[0].data).replace('/', '-');
+  var nome = 'bar-scolastico-' + anno + '.csv';
+
+  // Il segno iniziale dice a Excel che il file e' in UTF-8: senza, le accentate si rompono.
+  var blob = new Blob(['﻿' + riepilogoAnno()], { type: 'text/csv;charset=utf-8' });
+  var indirizzo = URL.createObjectURL(blob);
+
+  var a = document.createElement('a');
+  a.href = indirizzo;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(function () { URL.revokeObjectURL(indirizzo); }, 2000);
 }
 
 function disegnaProdotti() {
@@ -409,9 +687,12 @@ function aggiungiPezzo(id) {
   salva();
   disegnaTutto();
 
-  // Un colpetto di vibrazione: nel rumore dell'intervallo l'occhio e' gia' occupato
-  // a guardare il cliente, e il dito deve sapere da solo che il tocco e' andato.
-  if (navigator.vibrate) { navigator.vibrate(15); }
+  /* Un colpetto di vibrazione: nel rumore dell'intervallo l'occhio e' gia' occupato a
+     guardare il cliente, e il dito deve sapere da solo che il tocco e' andato. Si chiede
+     solo dopo un tocco vero: il browser rifiuta le altre e riempie la console di errori. */
+  if (navigator.vibrate && (!navigator.userActivation || navigator.userActivation.isActive)) {
+    navigator.vibrate(15);
+  }
   tieniAccesoLoSchermo();
 }
 
@@ -470,7 +751,6 @@ function incassa() {
 
   stato.giornata.vendite += 1;
   stato.giornata.incasso += da_pagare;
-  stato.precedente = null;      // il giorno prima non serve piu': oggi ha i suoi numeri
 
   svuotaVendita();
 }
@@ -486,7 +766,7 @@ function vaiA(nome) {
     prodotti_gia_sbloccati = true;
   }
 
-  ['cassa', 'giornata', 'prodotti'].forEach(function (n) {
+  ['cassa', 'giornata', 'storico', 'prodotti'].forEach(function (n) {
     document.getElementById('schermata-' + n).hidden = (n !== nome);
   });
 
@@ -497,6 +777,7 @@ function vaiA(nome) {
   });
 
   if (nome === 'giornata') { disegnaGiornata(); }
+  if (nome === 'storico') { allineaGiornata(); disegnaStorico(); }
   if (nome === 'prodotti') { disegnaProdotti(); }
   if (nome === 'cassa') { disegnaTutto(); }
 }
@@ -569,11 +850,41 @@ function collegaEventi() {
   $('#chiudi-cassa').addEventListener('click', function () {
     var quanto = euro(stato.giornata.incasso);
     if (!window.confirm('Chiudo la cassa di oggi?\n\nIncasso: ' + quanto +
-        '\n\nI totali tornano a zero. Segnati la cifra prima di confermare.')) { return; }
+        '\n\nLa giornata finisce nello Storico e i totali tornano a zero per domani.')) { return; }
+
+    archivia(stato.giornata, false);
     stato.giornata = giornataVuota();
-    stato.precedente = null;
     salva();
     disegnaGiornata();
+    vaiA('storico');       // subito il riepilogo di quello che si e' appena chiuso
+  });
+
+  $('#elenco-giorni').addEventListener('click', function (e) {
+    var testa = e.target.closest('.giorno-testa');
+    if (testa) { apriChiudiGiorno(testa.parentNode); }
+  });
+
+  $('#scarica-anno').addEventListener('click', scaricaRiepilogo);
+
+  /* Azzerare l'anno cancella l'unica traccia dei soldi della scuola: due conferme, e la
+     seconda dice per esteso che cosa sparisce. */
+  $('#chiudi-anno').addEventListener('click', function () {
+    var t = totaliAnno();
+    var n = stato.storico.length;
+    if (n === 0) { return; }
+
+    var anno = annoScolastico(stato.storico[0].data);
+
+    if (!window.confirm('Comincio un anno nuovo?\n\nAnno ' + anno + ': ' + n +
+        ' giorni, ' + euro(t.incasso) + ' incassati.\n\n' +
+        'Hai scaricato il riepilogo? Dopo non si recupera.')) { return; }
+
+    if (!window.confirm('Ultima conferma.\n\nSto per cancellare tutti i ' + n +
+        ' giorni dell\'anno ' + anno + '. I prodotti e i prezzi restano.')) { return; }
+
+    stato.storico = [];
+    salva();
+    disegnaStorico();
   });
 
   $('#elenco-prodotti').addEventListener('click', function (e) {

@@ -93,11 +93,13 @@ button { touch-action: manipulation; }
 .scheda {
   flex: 1;
   min-height: 48px;
+  padding: 0 2px;
   border: 0;
   border-radius: var(--raggio) var(--raggio) 0 0;
   background: rgba(255, 255, 255, .16);
   color: #fff;
   font-weight: 600;
+  font-size: clamp(.78rem, 3.3vw, 1rem);   /* quattro schede devono stare su 375 px */
   cursor: pointer;
 }
 
@@ -108,7 +110,7 @@ button { touch-action: manipulation; }
 main { flex: 1; min-height: 0; display: flex; }
 .schermata { flex: 1; min-height: 0; }
 
-.giornata, .prodotti {
+.giornata, .prodotti, .storico {
   overflow-y: auto;
   padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
   max-width: 720px;
@@ -370,6 +372,71 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 .btn-chiudi:active { background: var(--rosso-chiaro); }
 
 .spiega { color: var(--testo-tenue); font-size: .92rem; line-height: 1.5; }
+
+/* --------------------------------------------------------- storico */
+
+.titolo-anno { margin-top: 0; font-size: 1.15rem; }
+
+.giorni { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.giorno {
+  background: var(--carta);
+  border: 1px solid var(--bordo);
+  border-radius: var(--raggio);
+  box-shadow: var(--ombra);
+  overflow: hidden;
+}
+
+.giorno.aperto { border-color: var(--verde); }
+
+.giorno-testa {
+  width: 100%;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.giorno-testa:active { background: var(--verde-chiaro); }
+
+.giorno-freccia { color: var(--testo-tenue); font-size: .9rem; width: 14px; flex: none; }
+.giorno.aperto .giorno-freccia { color: var(--verde); }
+
+.giorno-data { flex: 1; font-weight: 600; font-size: .95rem; }
+.giorno-nota { display: block; font-weight: 400; font-size: .8rem; color: var(--ambra); }
+.giorno-pezzi { color: var(--testo-tenue); font-size: .9rem; font-variant-numeric: tabular-nums; }
+
+/* Su telefono la riga deve stare su una riga sola: i pezzi si leggono aprendo il giorno,
+   la data e l'incasso no. Fra i due, a sparire e' il conteggio dei pezzi. */
+@media (max-width: 430px) {
+  .giorno-pezzi { display: none; }
+}
+
+.giorno-cifra {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 82px;
+  text-align: right;
+}
+
+.giorno-corpo { padding: 0 12px 12px; }
+.giorno-corpo .tabella { box-shadow: none; border: 1px solid var(--bordo); }
+
+.btn-scarica {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--carta);
+  border-color: var(--verde);
+  color: var(--verde-testo);
+}
+
+.btn-scarica:active { background: var(--verde-chiaro); }
+.btn-scarica:disabled { border-color: var(--bordo); color: var(--testo-tenue); }
 
 /* --------------------------------------------------------- prodotti */
 

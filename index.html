@@ -22,6 +22,7 @@
   <nav class="schede" role="tablist" aria-label="Schermate">
     <button class="scheda attiva" role="tab" aria-selected="true" data-vai="cassa">Cassa</button>
     <button class="scheda" role="tab" aria-selected="false" data-vai="giornata">Giornata</button>
+    <button class="scheda" role="tab" aria-selected="false" data-vai="storico">Storico</button>
     <button class="scheda" role="tab" aria-selected="false" data-vai="prodotti">Prodotti</button>
   </nav>
 </header>
@@ -93,8 +94,41 @@
     <p class="nota-vuota" id="giornata-vuota">Oggi non hai ancora venduto niente.</p>
 
     <button class="btn btn-chiudi" id="chiudi-cassa" type="button">Chiudi cassa</button>
-    <p class="spiega">«Chiudi cassa» azzera i totali di oggi. Fallo a fine intervallo, dopo
-      aver segnato quanto hai incassato. I prodotti e i prezzi restano.</p>
+    <p class="spiega">«Chiudi cassa» archivia la giornata nello <strong>Storico</strong> e
+      riporta i totali a zero per domani. I prodotti e i prezzi restano.</p>
+  </section>
+
+  <!-- -------------------------------------------------------- STORICO -->
+  <section id="schermata-storico" class="schermata storico" role="tabpanel" aria-label="Storico" hidden>
+    <h2 class="titolo-anno" id="titolo-anno">Anno scolastico</h2>
+
+    <div class="cartellini">
+      <div class="cartellino grande">
+        <span class="cartellino-etichetta">Incassato nell'anno</span>
+        <strong class="cartellino-cifra" id="incasso-anno">0,00&nbsp;€</strong>
+      </div>
+      <div class="cartellino">
+        <span class="cartellino-etichetta">Giorni di apertura</span>
+        <strong class="cartellino-cifra" id="giorni-anno">0</strong>
+      </div>
+      <div class="cartellino">
+        <span class="cartellino-etichetta">Vendite</span>
+        <strong class="cartellino-cifra" id="vendite-anno">0</strong>
+      </div>
+    </div>
+
+    <h2>I giorni, dal primo all'ultimo</h2>
+    <p class="spiega">Tocca un giorno per vedere cosa è stato venduto.</p>
+    <ul class="giorni" id="elenco-giorni"></ul>
+    <p class="nota-vuota" id="storico-vuoto">Nessuna giornata archiviata: compariranno qui
+      dopo il primo «Chiudi cassa».</p>
+
+    <h2>Fine anno</h2>
+    <p class="spiega">Prima di azzerare, <strong>scarica il riepilogo</strong>: è l'unica
+      copia dei conti dell'anno, e serve a rendicontare alla scuola. Il file si apre con
+      Excel o LibreOffice.</p>
+    <button class="btn btn-scarica" id="scarica-anno" type="button">Scarica il riepilogo dell'anno</button>
+    <button class="btn btn-chiudi" id="chiudi-anno" type="button">Azzera e comincia un anno nuovo</button>
   </section>
 
   <!-- ------------------------------------------------------- PRODOTTI -->
