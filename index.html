@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cassa del bar</title>
+<meta name="description" content="Cassa del bar scolastico: prodotti, totale e resto.">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cassa bar">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icona-192.png">
+<link rel="apple-touch-icon" href="icona-apple-180.png">
+<link rel="stylesheet" href="stile.css">
+</head>
+<body>
+
+<header class="testata">
+  <h1 class="titolo">Cassa del bar</h1>
+  <nav class="schede" role="tablist" aria-label="Schermate">
+    <button class="scheda attiva" role="tab" aria-selected="true" data-vai="cassa">Cassa</button>
+    <button class="scheda" role="tab" aria-selected="false" data-vai="giornata">Giornata</button>
+    <button class="scheda" role="tab" aria-selected="false" data-vai="prodotti">Prodotti</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ---------------------------------------------------------- CASSA -->
+  <section id="schermata-cassa" class="schermata cassa" role="tabpanel" aria-label="Cassa">
+
+    <div class="griglia" id="griglia-prodotti"></div>
+
+    <aside class="conto">
+      <ul class="righe" id="righe" aria-label="Vendita in corso">
+        <li class="riga-vuota">Tocca un prodotto per cominciare</li>
+      </ul>
+
+      <div class="totale">
+        <span>Totale</span>
+        <strong id="totale">0,00&nbsp;€</strong>
+      </div>
+
+      <div class="contanti">
+        <div class="etichetta-contanti">
+          <span>Il cliente mi dà</span>
+          <button class="azzera" id="azzera-contanti" type="button" title="Azzera i contanti ricevuti">Azzera</button>
+        </div>
+        <div class="tagli" id="tagli"></div>
+        <div class="ricevuto">
+          Ricevuto: <strong id="ricevuto">0,00&nbsp;€</strong>
+        </div>
+      </div>
+
+      <div class="resto" id="resto" role="status" aria-live="polite">
+        <span class="resto-etichetta">Resto</span>
+        <span class="resto-cifra" id="resto-cifra">—</span>
+      </div>
+
+      <div class="azioni">
+        <button class="btn btn-annulla" id="annulla" type="button">Annulla</button>
+        <button class="btn btn-incassa" id="incassa" type="button" disabled>Incassa</button>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ------------------------------------------------------- GIORNATA -->
+  <section id="schermata-giornata" class="schermata giornata" role="tabpanel" aria-label="Giornata" hidden>
+    <p class="data-oggi" id="data-oggi"></p>
+
+    <div class="cartellini">
+      <div class="cartellino grande">
+        <span class="cartellino-etichetta">Incassato oggi</span>
+        <strong class="cartellino-cifra" id="incasso-oggi">0,00&nbsp;€</strong>
+      </div>
+      <div class="cartellino">
+        <span class="cartellino-etichetta">Vendite</span>
+        <strong class="cartellino-cifra" id="vendite-oggi">0</strong>
+      </div>
+      <div class="cartellino">
+        <span class="cartellino-etichetta">Pezzi venduti</span>
+        <strong class="cartellino-cifra" id="pezzi-oggi">0</strong>
+      </div>
+    </div>
+
+    <h2>Cosa è stato venduto</h2>
+    <table class="tabella" id="tabella-pezzi">
+      <thead><tr><th>Prodotto</th><th class="num">Pezzi</th><th class="num">Incasso</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="nota-vuota" id="giornata-vuota">Oggi non hai ancora venduto niente.</p>
+
+    <button class="btn btn-chiudi" id="chiudi-cassa" type="button">Chiudi cassa</button>
+    <p class="spiega">«Chiudi cassa» azzera i totali di oggi. Fallo a fine intervallo, dopo
+      aver segnato quanto hai incassato. I prodotti e i prezzi restano.</p>
+  </section>
+
+  <!-- ------------------------------------------------------- PRODOTTI -->
+  <section id="schermata-prodotti" class="schermata prodotti" role="tabpanel" aria-label="Prodotti" hidden>
+    <h2>I prodotti in vendita</h2>
+    <ul class="elenco-prodotti" id="elenco-prodotti"></ul>
+
+    <form class="aggiungi" id="form-prodotto">
+      <h2>Aggiungi un prodotto</h2>
+      <div class="campi">
+        <label>
+          <span>Nome</span>
+          <input type="text" id="nuovo-nome" maxlength="24" required placeholder="es. Cornetto">
+        </label>
+        <label>
+          <span>Prezzo in euro</span>
+          <input type="text" id="nuovo-prezzo" inputmode="decimal" required placeholder="es. 1,20">
+        </label>
+      </div>
+      <button class="btn btn-aggiungi" type="submit">Aggiungi</button>
+      <p class="errore" id="errore-prodotto" role="alert" hidden></p>
+    </form>
+
+    <p class="spiega">I prezzi si scrivono con la virgola: <code>1,50</code>. Le modifiche
+      valgono subito e restano salvate su questo dispositivo.</p>
+  </section>
+
+</main>
+
+<script src="cassa.js"></script>
+</body>
+</html>
