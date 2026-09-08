@@ -427,6 +427,18 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 .giorno-corpo { padding: 0 12px 12px; }
 .giorno-corpo .tabella { box-shadow: none; border: 1px solid var(--bordo); }
 
+.btn-elimina-giorno {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 6px;
+  font-size: .95rem;
+  background: var(--carta);
+  border-color: var(--rosso);
+  color: var(--rosso);
+}
+
+.btn-elimina-giorno:active { background: var(--rosso-chiaro); }
+
 .btn-scarica {
   width: 100%;
   margin-top: 4px;

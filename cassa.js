@@ -516,7 +516,33 @@ function corpoGiorno(g) {
     ' · incasso ' + euro(g.incasso);
   box.appendChild(riga);
 
+  /* Il pulsante sta qui dentro e non sulla riga chiusa: per cancellare una giornata
+     bisogna prima averla aperta, cioe' aver visto cosa contiene. */
+  var elimina = document.createElement('button');
+  elimina.type = 'button';
+  elimina.className = 'btn btn-elimina-giorno';
+  elimina.dataset.eliminaGiorno = g.data;
+  elimina.textContent = 'Elimina questa giornata';
+  box.appendChild(elimina);
+
   return box;
+}
+
+/* Serve a togliere le prove: una giornata finta lasciata dentro si sommerebbe agli
+   incassi veri fino alla fine dell'anno. */
+function eliminaGiorno(data) {
+  var g = null;
+  stato.storico.forEach(function (x) { if (x.data === data) { g = x; } });
+  if (!g) { return; }
+
+  var quante = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite');
+  if (!window.confirm('Elimino la giornata di ' + dataLunga(data) + '?\n\n' +
+      euro(g.incasso) + ' in ' + quante + ' escono dai conti dell\'anno.\n\n' +
+      'Non si torna indietro.')) { return; }
+
+  stato.storico = stato.storico.filter(function (x) { return x.data !== data; });
+  salva();
+  disegnaStorico();
 }
 
 function disegnaStorico() {
@@ -860,6 +886,9 @@ function collegaEventi() {
   });
 
   $('#elenco-giorni').addEventListener('click', function (e) {
+    var cancella = e.target.closest('[data-elimina-giorno]');
+    if (cancella) { eliminaGiorno(cancella.dataset.eliminaGiorno); return; }
+
     var testa = e.target.closest('.giorno-testa');
     if (testa) { apriChiudiGiorno(testa.parentNode); }
   });
