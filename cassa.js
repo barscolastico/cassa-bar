@@ -620,6 +620,22 @@ function disegnaGriglia() {
   });
 }
 
+/* La lista della vendita e' alta una riga sola sul telefono - lo spazio in altezza e'
+   dei prodotti, vedi la scheda dell'aspetto - e senza questo mostrerebbe sempre la
+   PRIMA voce battuta: tocchi «Crackers» e leggi «Focaccia», cioe' la conferma che
+   arriva agli occhi non e' quella del tocco che hai appena dato. Scorre solo se la
+   voce e' davvero fuori, e di quel poco che basta: la lista non salta sotto il dito. */
+function mostraLaVoceToccata(righe) {
+  if (!ultimo_toccato) { return; }
+  var li = righe.querySelector('[data-riga="' + ultimo_toccato + '"]');
+  if (!li) { return; }
+
+  var voce = li.getBoundingClientRect();
+  var finestra = righe.getBoundingClientRect();
+  if (voce.top < finestra.top) { righe.scrollTop += voce.top - finestra.top; }
+  else if (voce.bottom > finestra.bottom) { righe.scrollTop += voce.bottom - finestra.bottom; }
+}
+
 function disegnaConto() {
   var righe = $('#righe');
   righe.textContent = '';
@@ -635,6 +651,7 @@ function disegnaConto() {
     vive.forEach(function (r) {
       var p = prodottoCon(r.id);
       var li = document.createElement('li');
+      li.dataset.riga = r.id;
 
       var togli = document.createElement('button');
       togli.type = 'button';
@@ -661,6 +678,7 @@ function disegnaConto() {
       li.appendChild(somma);
       righe.appendChild(li);
     });
+    mostraLaVoceToccata(righe);
   }
 
   var da_pagare = totale();
@@ -1113,8 +1131,12 @@ function disegnaTutto() {
 
 // --------------------------------------------------------------- vendita
 
+// L'ultimo prodotto toccato, in piu' o in meno: serve a tenerlo in vista nella lista.
+var ultimo_toccato = null;
+
 function aggiungiPezzo(id) {
   if (!prodottoCon(id)) { return; }
+  ultimo_toccato = id;
   var trovata = false;
   stato.vendita.righe.forEach(function (r) {
     if (r.id === id) { r.qta += 1; trovata = true; }
@@ -1147,6 +1169,7 @@ function tieniAccesoLoSchermo() {
 }
 
 function togliPezzo(id) {
+  ultimo_toccato = id;
   stato.vendita.righe = stato.vendita.righe.map(function (r) {
     return r.id === id ? { id: r.id, qta: r.qta - 1 } : r;
   }).filter(function (r) { return r.qta > 0; });
@@ -1155,6 +1178,7 @@ function togliPezzo(id) {
 }
 
 function svuotaVendita() {
+  ultimo_toccato = null;
   stato.vendita = { righe: [], contanti: 0 };
   salva();
   disegnaTutto();
