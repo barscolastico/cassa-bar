@@ -94,8 +94,32 @@ function annoScolastico(iso) {
   return m >= 9 ? a + '/' + (a + 1) : (a - 1) + '/' + a;
 }
 
+/* Le voci di una giornata, ripulite. Non e' pignoleria: una 'qta' che non e' un
+   numero fa comparire «0due» al posto dei pezzi venduti, e una voce nulla fa saltare
+   in aria le schermate Giornata e Storico - schermata morta, e per rimetterla in
+   piedi bisognerebbe svuotare la memoria del browser, cioe' buttare via anche le
+   giornate che non sono ancora arrivate al server. Il server fa questo stesso
+   controllo su quello che riceve; qui si fa su quello che si rilegge da casa. */
+function vociBuone(grezze) {
+  var pulite = {};
+  if (!grezze || typeof grezze !== 'object') { return pulite; }
+
+  Object.keys(grezze).forEach(function (k) {
+    var v = grezze[k];
+    if (!v || typeof v !== 'object') { return; }
+    if (typeof v.nome !== 'string' || v.nome.length === 0) { return; }
+    if (!Number.isFinite(v.qta) || !Number.isFinite(v.somma)) { return; }
+    pulite[k] = { nome: v.nome, qta: Math.round(v.qta), somma: Math.round(v.somma) };
+  });
+
+  return pulite;
+}
+
 function pezziDelGiorno(g) {
-  return Object.keys(g.voci).reduce(function (n, k) { return n + g.voci[k].qta; }, 0);
+  var voci = g.voci || {};
+  return Object.keys(voci).reduce(function (n, k) {
+    return n + (Number.isFinite(voci[k] && voci[k].qta) ? voci[k].qta : 0);
+  }, 0);
 }
 
 /* Rileggere quello che c'e' salvato senza fidarsene: il salvataggio puo' essere
@@ -135,7 +159,7 @@ function carica() {
       data: letto.giornata.data,
       vendite: Number.isFinite(letto.giornata.vendite) ? letto.giornata.vendite : 0,
       incasso: Number.isFinite(letto.giornata.incasso) ? letto.giornata.incasso : 0,
-      voci: (letto.giornata.voci && typeof letto.giornata.voci === 'object') ? letto.giornata.voci : {}
+      voci: vociBuone(letto.giornata.voci)
     };
   }
 
@@ -153,7 +177,7 @@ function carica() {
         data: g.data,
         vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
         incasso: g.incasso,
-        voci: (g.voci && typeof g.voci === 'object') ? g.voci : {},
+        voci: vociBuone(g.voci),
         automatica: !!g.automatica,
         inviata: g.inviata === true
       };
@@ -190,8 +214,9 @@ function salva() {
    l'incasso. Serve ad archiviare, e serve a mettere insieme quello che hanno fatto
    dispositivi diversi nello stesso giorno. */
 function sommaVoci(dentro, da) {
-  Object.keys(da || {}).forEach(function (k) {
-    var v = da[k];
+  var buone = vociBuone(da);
+  Object.keys(buone).forEach(function (k) {
+    var v = buone[k];
     var d = dentro[k] || { nome: v.nome, qta: 0, somma: 0 };
     d.nome = v.nome;
     d.qta += v.qta;
@@ -937,9 +962,35 @@ function eliminaGiorno(data) {
   if (!g) { return; }
 
   var quante = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite');
+  /* «Si puo' rimettere» vale perche' il server non cancella: ci mette un segno. Ma
+     non vale sempre, e promettere il contrario e' la cosa peggiore da scrivere sotto
+     un pulsante che tocca i soldi della scuola. Tre casi, tre frasi diverse. */
+  var poi;
+  if (!window.Sincronia.configurato()) {
+    poi = 'Non c’è nessun server: questa giornata sta soltanto su questo dispositivo, ' +
+          'e togliendola sparisce per sempre.';
+  } else if (g.da_inviare) {
+    poi = 'Attenzione: questa giornata non è ancora arrivata al server. Togliendola qui ' +
+          'sparisce e non si può più rimettere.';
+  } else {
+    poi = 'Sul server la giornata resta scritta e si può rimettere.';
+  }
+
   if (!window.confirm('Tolgo dai conti la giornata di ' + dataLunga(data) + '?\n\n' +
       euro(g.incasso) + ' in ' + quante + ' escono dai totali dell\'anno, su tutti i ' +
-      'dispositivi.\n\nSul server la giornata resta scritta e si può rimettere.')) { return; }
+      'dispositivi.\n\n' + poi)) { return; }
+
+  /* Senza server non c'e' nessuno a cui chiederlo, e la giornata vive solo qui: si
+     toglie e basta. Fino al 9 settembre 2026 il pulsante veniva costruito lo stesso -
+     senza server «puoModificare» dice di si', ed e' giusto - ma poi chiedeva al
+     server, che non c'e', e falliva ogni volta con un avviso incomprensibile. Il
+     pulsante c'era e non funzionava mai. */
+  if (!window.Sincronia.configurato()) {
+    stato.mio = stato.mio.filter(function (x) { return x.data !== data; });
+    salva();
+    disegnaStorico();
+    return;
+  }
 
   window.Sincronia.annulla(data).then(function () {
     stato.mio = stato.mio.filter(function (x) { return x.data !== data; });
@@ -1001,6 +1052,25 @@ function virgola(centesimi) {
   return (centesimi / 100).toFixed(2).replace('.', ',');
 }
 
+/* Un campo del foglio, scritto in modo che non possa rompere la riga.
+
+   Due guai diversi, e tutti e due si vedono solo aprendo il file mesi dopo:
+   il punto e virgola separa le colonne, quindi un prodotto chiamato «Acqua;
+   naturale» spezzerebbe la riga in due e sposterebbe l'incasso sotto la colonna
+   sbagliata; e un nome che comincia per = + - @ viene letto da Excel e LibreOffice
+   come una FORMULA invece che come testo. Le virgolette raddoppiate sono il modo
+   standard di dire «questo e' tutto un campo solo»; l'apice davanti disinnesca la
+   formula e non si vede nella cella. */
+function campo(testo) {
+  var t = String(testo);
+  if (t.length > 0 && '=+-@'.indexOf(t.charAt(0)) !== -1) { t = "'" + t; }
+
+  var scomodo = t.indexOf('"') !== -1 || t.indexOf(';') !== -1 ||
+                t.indexOf('\n') !== -1 || t.indexOf('\r') !== -1;
+
+  return scomodo ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+
 /* Un foglio che si apre con Excel o LibreOffice. Punto e virgola come separatore e
    virgola nei decimali: e' quello che si aspetta un foglio di calcolo italiano. */
 function riepilogoAnno() {
@@ -1014,7 +1084,7 @@ function riepilogoAnno() {
   r.push('Giorno;Data;Vendite;Pezzi;Incasso');
 
   giorni.forEach(function (g) {
-    r.push(dataLunga(g.data, true) + ';' + g.data + ';' + g.vendite + ';' +
+    r.push(campo(dataLunga(g.data, true)) + ';' + g.data + ';' + g.vendite + ';' +
            pezziDelGiorno(g) + ';' + virgola(g.incasso));
   });
 
@@ -1026,7 +1096,7 @@ function riepilogoAnno() {
   giorni.forEach(function (g) {
     Object.keys(g.voci).forEach(function (k) {
       var v = g.voci[k];
-      r.push(g.data + ';' + v.nome + ';' + v.qta + ';' + virgola(v.somma));
+      r.push(g.data + ';' + campo(v.nome) + ';' + v.qta + ';' + virgola(v.somma));
     });
   });
 
@@ -1503,7 +1573,14 @@ function avvisaVersioneNuova() {
 
   striscia.appendChild(testo);
   striscia.appendChild(bottone);
-  document.body.appendChild(striscia);
+
+  /* Dentro la testata, sopra le schede. Fino al 9 settembre 2026 stava incollata in
+     fondo allo schermo: su un telefono basso copriva per intero «Annulla» e
+     «Incassa», cioe' i due pulsanti che chiudono la vendita che si ha per le mani, e
+     l'unico modo per liberarli era ricaricare - che poi richiede la password, con la
+     fila davanti. Un avviso non si mette mai davanti al lavoro. */
+  var testata = document.querySelector('.testata');
+  testata.insertBefore(striscia, testata.querySelector('.schede'));
 }
 
 function collegaServiceWorker() {
