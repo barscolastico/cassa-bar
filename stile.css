@@ -483,6 +483,15 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 .btn-scarica:active { background: var(--verde-chiaro); }
 .btn-scarica:disabled { border-color: var(--bordo); color: var(--testo-tenue); }
 
+/* Dentro una giornata aperta i due pulsanti stanno uno sotto l'altro e devono avere
+   la stessa misura: il verde porta fuori il foglio, il rosso tocca i conti. Senza
+   questo il verde nasce piu' basso e i due sembrano di due pesi diversi. */
+.btn-scarica-giorno {
+  min-height: 48px;
+  margin-top: 6px;
+  font-size: .95rem;
+}
+
 /* --------------------------------------------------------- prodotti */
 
 .elenco-prodotti { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

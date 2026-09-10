@@ -928,6 +928,17 @@ function corpoGiorno(g) {
     ' · incasso ' + euro(g.incasso);
   box.appendChild(riga);
 
+  /* Sta PRIMA di «Togli questa giornata» apposta: la cosa innocua per prima, quella
+     che tocca i conti per ultima. E non chiede nessun permesso - copiare fuori
+     quello che si ha gia' davanti agli occhi non cambia niente per nessuno, quindi
+     il pulsante c'e' anche per chi puo' solo guardare. */
+  var word = document.createElement('button');
+  word.type = 'button';
+  word.className = 'btn btn-scarica btn-scarica-giorno';
+  word.dataset.scaricaGiorno = g.data;
+  word.textContent = 'Scarica questa giornata in Word';
+  box.appendChild(word);
+
   /* Il pulsante si costruisce SOLO se il server dice che questo dispositivo puo'
      modificare. Su tutti gli altri non esiste dentro la pagina: non e' nascosto,
      non c'e' proprio. E se anche qualcuno lo facesse comparire a forza, il server
@@ -1111,15 +1122,83 @@ function scaricaRiepilogo() {
 
   // Il segno iniziale dice a Excel che il file e' in UTF-8: senza, le accentate si rompono.
   var blob = new Blob(['﻿' + riepilogoAnno()], { type: 'text/csv;charset=utf-8' });
-  var indirizzo = URL.createObjectURL(blob);
 
-  var a = document.createElement('a');
-  a.href = indirizzo;
-  a.download = nome;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(function () { URL.revokeObjectURL(indirizzo); }, 2000);
+  window.Documento.scarica(blob, nome);
+}
+
+// --------------------------------------------------------------- la giornata in Word
+
+/* Una giornata sola su un foglio, da stampare o da allegare a una mail.
+
+   Non fa lo stesso mestiere del riepilogo dell'anno qui sopra, ed e' il motivo per
+   cui sono due pulsanti diversi: quello e' un foglio di CALCOLO e serve a sommare
+   duecento giorni; questo e' CARTA e serve a mostrarne uno solo a qualcuno. Nessuno
+   dei due e' uno scontrino e nessuno dei due fa fede di niente.
+
+   Il documento vero e proprio lo impagina documento.js. Qui si decide solo cosa ci
+   va scritto, e i centesimi diventano euro con euro() come dappertutto. */
+function scaricaGiornataWord(data) {
+  var g = null;
+  giornateDellAnno().forEach(function (x) { if (x.data === data) { g = x; } });
+  if (!g) { return; }
+
+  // Su un foglio la data e' un titolo e comincia in maiuscolo; nell'elenco no.
+  var giorno = dataLunga(g.data, true);
+  var pezzi = pezziDelGiorno(g);
+
+  var blocchi = [
+    { tipo: 'titolo', testo: 'Bar scolastico' },
+    { tipo: 'sottotitolo',
+      testo: 'Riepilogo della giornata · anno scolastico ' + annoCorrente() },
+    { tipo: 'giorno', testo: giorno.charAt(0).toUpperCase() + giorno.slice(1) },
+    { tipo: 'forte', testo: 'Incasso della giornata: ' + euro(g.incasso) },
+    { tipo: 'riga', testo: g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
+        ' · ' + pezzi + (pezzi === 1 ? ' pezzo' : ' pezzi') }
+  ];
+
+  /* Le stesse due note che si vedono sulla riga dello Storico. Su un foglio che gira
+     fuori dall'app contano di piu': dicono perche' quel numero potrebbe non essere
+     l'ultima parola. */
+  if (g.automatica) {
+    blocchi.push({ tipo: 'tenue', testo: 'La cassa di questo giorno non è stata ' +
+      'chiusa a mano: è stata archiviata da sola.' });
+  }
+
+  if (g.da_inviare && window.Sincronia.configurato()) {
+    blocchi.push({ tipo: 'tenue', testo: 'Una parte di questa giornata non è ancora ' +
+      'arrivata al server: su altri dispositivi i totali possono essere più bassi.' });
+  }
+
+  var voci = g.voci || {};
+  var chiavi = Object.keys(voci).sort(function (a, b) { return voci[b].qta - voci[a].qta; });
+
+  if (chiavi.length === 0) {
+    blocchi.push({ tipo: 'riga',
+      testo: 'Di questo giorno è rimasto solo il totale, non il dettaglio dei prodotti.' });
+  } else {
+    blocchi.push({
+      tipo: 'tabella',
+      intestazione: ['Prodotto', 'Pezzi', 'Incasso'],
+      righe: chiavi.map(function (k) {
+        return [voci[k].nome, String(voci[k].qta), euro(voci[k].somma)];
+      }),
+      totale: ['Totale', String(pezzi), euro(g.incasso)]
+    });
+  }
+
+  blocchi.push({ tipo: 'tenue', testo: 'Il ricavato resta alla scuola. Questo foglio ' +
+    'non è uno scontrino fiscale.' });
+  blocchi.push({ tipo: 'tenue', testo: 'Scaricato il ' + dataLunga(oggi(), true) + '.' });
+
+  /* Se qualcosa va storto lo si deve VEDERE. Un pulsante che non fa niente e non
+     dice niente e' il difetto peggiore da inseguire mesi dopo: si finisce a cercare
+     il file scaricato in tutte le cartelle del telefono. */
+  try {
+    window.Documento.scarica(window.Documento.word(blocchi),
+      'bar-scolastico-' + g.data + '.docx');
+  } catch (e) {
+    window.alert('Il file Word non è stato creato: ' + (e.message || 'errore sconosciuto.'));
+  }
 }
 
 function disegnaProdotti() {
@@ -1398,6 +1477,9 @@ function collegaEventi() {
   });
 
   $('#elenco-giorni').addEventListener('click', function (e) {
+    var word = e.target.closest('[data-scarica-giorno]');
+    if (word) { scaricaGiornataWord(word.dataset.scaricaGiorno); return; }
+
     var cancella = e.target.closest('[data-elimina-giorno]');
     if (cancella) { eliminaGiorno(cancella.dataset.eliminaGiorno); return; }
 

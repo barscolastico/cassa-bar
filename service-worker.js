@@ -8,13 +8,14 @@
    al browser «la copia che tieni e' vecchia, riscaricala». Senza, chi l'ha gia'
    installata resta per sempre alla versione di prima.  */
 
-var VERSIONE = 'cassa-bar-6';
+var VERSIONE = 'cassa-bar-7';
 
 var FILE = [
   './',
   './index.html',
   './stile.css',
   './cassa.js',
+  './documento.js',
   './sincronia.js',
   './manifest.webmanifest',
   './icona-192.png',
