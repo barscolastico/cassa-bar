@@ -33,6 +33,27 @@
   </form>
 </div>
 
+<!-- Il tastierino del buono. Sta qui e non e' una finestra di sistema per la stessa
+     ragione del lucchetto, piu' una sua: la tastiera del telefono coprirebbe meta'
+     schermo - i prodotti e «Incassa» - e questa e' l'unica cosa in tutta l'app che
+     si digita. I tasti li costruisce cassa.js, come quelli dei tagli. -->
+<div class="tastierino" id="tastierino" hidden>
+  <div class="tastierino-scatola" role="dialog" aria-modal="true"
+       aria-labelledby="tastierino-titolo">
+    <h2 class="tastierino-titolo" id="tastierino-titolo">Buono</h2>
+    <p class="tastierino-invito">Scrivi quanto vale il buono che lo studente ti sta
+      mostrando. Le cifre entrano da destra: 5 0 0 fa 5,00&nbsp;€.</p>
+    <p class="tastierino-cifra" id="tastierino-cifra" role="status" aria-live="polite"
+       aria-label="Valore del buono">0,00&nbsp;€</p>
+    <div class="tastierino-tasti" id="tastierino-tasti"></div>
+    <button class="btn btn-togli-buono" id="tastierino-togli" type="button" hidden>Togli il buono</button>
+    <div class="tastierino-azioni">
+      <button class="btn btn-annulla" id="tastierino-lascia" type="button">Lascia stare</button>
+      <button class="btn btn-incassa" id="tastierino-ok" type="button">Conferma</button>
+    </div>
+  </div>
+</div>
+
 <header class="testata">
   <h1 class="titolo">Cassa del bar</h1>
   <nav class="schede" role="tablist" aria-label="Schermate">
@@ -125,6 +146,7 @@
       <div class="cartellino grande">
         <span class="cartellino-etichetta">Incassato nell'anno</span>
         <strong class="cartellino-cifra" id="incasso-anno">0,00&nbsp;€</strong>
+        <span class="cartellino-nota" id="incasso-anno-buoni"></span>
       </div>
       <div class="cartellino">
         <span class="cartellino-etichetta">Giorni di apertura</span>

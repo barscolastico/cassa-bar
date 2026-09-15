@@ -13,6 +13,13 @@
   --ambra: #b45309;
   --ambra-chiaro: #fef3c7;
 
+  /* Il quarto colore, e non un riuso: il verde e' l'app, il rosso ha un mestiere
+     solo - i contanti non bastano - e l'ambra dice «pagamento esatto». Il buono
+     non e' denaro e non deve somigliare a niente di tutto questo. */
+  --blu: #1d4ed8;
+  --blu-chiaro: #dbeafe;
+  --blu-testo: #1e3a8a;     /* testo sopra --blu-chiaro */
+
   --fondo: #f1f5f9;
   --carta: #ffffff;
   --bordo: #cbd5e1;
@@ -33,6 +40,9 @@
     --rosso-chiaro: #450a0a;
     --ambra: #fbbf24;
     --ambra-chiaro: #451a03;
+    --blu: #60a5fa;
+    --blu-chiaro: #172554;
+    --blu-testo: #93c5fd;
 
     --fondo: #0b1220;
     --carta: #16202e;
@@ -170,7 +180,27 @@ main { flex: 1; min-height: 0; display: flex; }
 .prodotto:active { transform: scale(.97); border-color: var(--verde); }
 .prodotto.scelto { border-color: var(--verde); background: var(--verde-chiaro); }
 
-.prodotto-nome { grid-column: 1 / -1; font-weight: 600; line-height: 1.2; }
+/* Il nome si ferma a DUE righe e poi mette i puntini.
+
+   Senza questo limite, un nome lungo - «Pizza Wustel Patatine» sul listino vero -
+   va su tre righe, e siccome il riquadro ha un'altezza fissa e il contenuto e'
+   centrato, quello che avanza esce da tutte e due le parti: sul telefono da
+   320x690 il PREZZO usciva di 11 px sotto il bordo, cioe' spariva. Il nome si
+   puo' accorciare, il prezzo no: chi batte cassa il prodotto lo riconosce lo
+   stesso, ma il prezzo o si legge o non si legge.
+
+   Il nome intero resta comunque leggibile: sta nell'aria-label del riquadro, che
+   e' quello che leggono i lettori di schermo. */
+.prodotto-nome {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 .prodotto-prezzo { grid-column: 2; grid-row: 2; color: var(--testo-tenue); font-variant-numeric: tabular-nums; }
 .prodotto.scelto .prodotto-prezzo { color: var(--verde-testo); }
 
@@ -235,6 +265,11 @@ main { flex: 1; min-height: 0; display: flex; }
 
 .righe li:last-child { border-bottom: 0; }
 .riga-vuota { color: var(--testo-tenue); justify-content: center; font-style: italic; }
+
+/* Subito dopo «Incassa», al posto di «Tocca un prodotto per cominciare»: e' il
+   punto dove l'occhio va da solo appena la vendita si chiude, e non costa una
+   riga in piu' perche' quella riga c'era gia'. */
+.riga-vuota.promemoria { color: var(--blu-testo); font-style: normal; font-weight: 600; }
 .riga-nome { flex: 1; }
 .riga-qta { font-variant-numeric: tabular-nums; color: var(--testo-tenue); }
 .riga-somma { font-variant-numeric: tabular-nums; min-width: 74px; text-align: right; }
@@ -301,10 +336,40 @@ main { flex: 1; min-height: 0; display: flex; }
 
 .taglio:active { background: var(--verde-chiaro); border-color: var(--verde); }
 
-/* Nove tagli piu' «Conta giusti» che ne occupa tre: dodici caselle esatte, cioe'
-   tre righe piene su quattro colonne. Se un giorno si aggiunge o si toglie un
-   taglio, questo numero va rifatto, altrimenti resta un buco in fondo. */
-.taglio.esatto { grid-column: span 3; color: var(--verde); border-color: var(--verde); }
+/* OTTO tagli, piu' «Buono» e «Conta giusti» che ne occupano due ciascuno: dodici
+   caselle esatte, cioe' tre righe piene su quattro colonne. Se un giorno si
+   aggiunge o si toglie un taglio, questo numero va rifatto, altrimenti resta un
+   buco in fondo.
+
+   Fino al 15 settembre 2026 i tagli erano nove e «Conta giusti» ne occupava tre
+   da solo: anche quello faceva dodici. Per far entrare «Buono» largo abbastanza
+   da leggersi, il taglio da 50 € e' stato tolto. L'alternativa era una riga in
+   piu', e su uno schermo da 320x690 e' stata misurata: il conto passava da 474 a
+   596 px e dei prodotti non ne restava visibile neanche uno intero. Quei pixel li
+   paga sempre la griglia dei prodotti, che vive dell'avanzo - e' il difetto
+   corretto con 'cassa-bar-5', e non si ripaga due volte. */
+.taglio.esatto { grid-column: span 2; color: var(--verde); border-color: var(--verde); }
+
+/* Il buono non e' un taglio: e' un altro modo di pagare. Colore suo, e due righe
+   dentro lo stesso pulsante quando c'e' - l'importo sopra, quello che resta sotto -
+   cosi' il numero sta attaccato alla cosa a cui appartiene e nel conto non compare
+   nessuna riga nuova. Se comparisse, i tasti dei tagli e «Incassa» si
+   sposterebbero sotto il dito mentre si batte. */
+.taglio.buono {
+  grid-column: span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+  color: var(--blu);
+  border-color: var(--blu);
+}
+
+.taglio.buono:active { background: var(--blu-chiaro); border-color: var(--blu); }
+.taglio.buono.acceso { background: var(--blu-chiaro); color: var(--blu-testo); }
+.taglio-resto { font-size: .72rem; font-weight: 600; opacity: .9; }
 
 .ricevuto {
   color: var(--testo-tenue);
@@ -342,6 +407,12 @@ main { flex: 1; min-height: 0; display: flex; }
 .resto.manca .resto-cifra, .resto.manca .resto-etichetta { color: var(--rosso); }
 .resto.pari { background: var(--ambra-chiaro); border-color: var(--ambra); }
 .resto.pari .resto-cifra { color: var(--ambra); }
+
+/* Il buono copre tutto e di contanti non ne servono. Nel riquadro grande ci va
+   sempre e solo il DENARO da restituire: quello che resta sul buono sta sul
+   pulsante del buono, perche' non e' denaro e non deve uscire dalla cassa. */
+.resto.col-buono { background: var(--blu-chiaro); border-color: var(--blu); }
+.resto.col-buono .resto-cifra, .resto.col-buono .resto-etichetta { color: var(--blu-testo); }
 
 .azioni { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
 
@@ -382,6 +453,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .cartellino.grande { grid-column: 1 / -1; background: var(--verde-chiaro); border-color: var(--verde); }
 .cartellino-etichetta { color: var(--testo-tenue); font-size: .9rem; }
 .cartellino.grande .cartellino-etichetta { color: var(--verde-testo); }
+.cartellino.grande .cartellino-nota { color: var(--verde-testo); }
 
 .cartellino-cifra {
   font-size: 1.6rem;
@@ -629,6 +701,92 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 .lucchetto-campo:focus { outline: 3px solid var(--verde); outline-offset: 1px; border-color: var(--verde); }
 .lucchetto .btn { width: 100%; }
 
+/* --------------------------------------------------------- il tastierino */
+
+/* Serve a scrivere quanto vale il buono, ed e' l'unica cosa in tutta l'app che si
+   digita. Non e' un campo di testo apposta: la tastiera del telefono coprirebbe
+   meta' schermo, cioe' i prodotti e «Incassa», e in dieci minuti d'intervallo
+   quello e' un difetto. Tasti grandi come tutti gli altri, e i centesimi che
+   entrano da destra come su una cassa vera.
+
+   'align-items: flex-start' piu' 'margin: auto' sulla scatola: e' il modo di
+   centrare che non taglia niente quando il contenuto e' piu' alto dello schermo -
+   col telefono girato di lato succede, e li' si scorre invece di perdere i tasti. */
+.tastierino {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: var(--fondo);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px max(16px, env(safe-area-inset-left), env(safe-area-inset-right))
+           calc(16px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.tastierino-scatola {
+  margin: auto;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px;
+  border-radius: var(--raggio);
+  background: var(--carta);
+  box-shadow: var(--ombra);
+}
+
+.tastierino-titolo { margin: 0; font-size: 1.25rem; color: var(--blu-testo); }
+.tastierino-invito { margin: 0; color: var(--testo-tenue); line-height: 1.45; font-size: .95rem; }
+
+.tastierino-cifra {
+  margin: 0;
+  padding: 6px 14px;
+  border: 2px solid var(--blu);
+  border-radius: 12px;
+  background: var(--blu-chiaro);
+  color: var(--blu-testo);
+  font-size: clamp(2rem, 9vw, 2.6rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  line-height: 1.2;
+}
+
+.tastierino-tasti { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+.tasto {
+  min-height: 56px;
+  border: 2px solid var(--bordo);
+  border-radius: 12px;
+  background: var(--carta);
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.tasto:active { background: var(--blu-chiaro); border-color: var(--blu); }
+.tasto.zero { grid-column: span 2; }
+.tasto.cancella { color: var(--testo-tenue); }
+
+/* Stesso posto di «Annulla» e «Incassa» nel conto - la scelta leggera a sinistra,
+   quella che conferma a destra - ma metà e metà, non un terzo e due terzi: qui
+   nessuna delle due tocca i soldi, e su uno schermo da 320 px «Lascia stare» in un
+   terzo di riga andrebbe a capo dentro il pulsante. */
+.tastierino-azioni { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.btn-togli-buono {
+  width: 100%;
+  background: var(--carta);
+  border-color: var(--rosso);
+  color: var(--rosso);
+}
+
+.btn-togli-buono:active { background: var(--rosso-chiaro); }
+
 /* --------------------------------------------------------- stato della rete */
 
 /* Una riga sola, tenue: dice se i conti sono arrivati al server. Non deve gridare,
@@ -689,6 +847,7 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 
   .griglia { padding: 8px; gap: 6px; }
   .prodotto { min-height: 64px; padding: 8px 6px; gap: 2px; }
+  .prodotto-nome { line-height: 1.1; }
 
   .contatore { min-width: 26px; height: 24px; padding: 0 5px; font-size: .82rem; }
 
@@ -713,8 +872,21 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   .prodotto { min-height: 110px; }
   .conto { border-top: 0; border-left: 2px solid var(--bordo); overflow-y: auto; }
   .righe { height: auto; max-height: none; }
-  .tagli { grid-template-columns: repeat(3, 1fr); }
-  .taglio.esatto { grid-column: span 3; }
+  /* Qui i tagli restano quattro per riga come sul telefono. Fino al 15 settembre
+     2026 erano tre, che con nove tagli faceva righe piene; con otto piu' i due
+     pulsanti larghi le righe piene le fanno le quattro colonne, le stesse
+     dappertutto. Nella colonna del conto ogni tasto resta sopra i 90 px. */
+  .taglio.buono { flex-direction: row; gap: 10px; }
+}
+
+@media (max-height: 620px) {
+  .tastierino { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .tastierino-scatola { gap: 7px; padding: 12px 14px; }
+  .tastierino-titolo { font-size: 1.05rem; }
+  .tastierino-invito { font-size: .85rem; line-height: 1.3; }
+  .tastierino-cifra { padding: 2px 12px; font-size: clamp(1.6rem, 7vw, 2.2rem); }
+  .tastierino-tasti { gap: 5px; }
+  .tastierino .btn { min-height: 56px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

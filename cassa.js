@@ -24,10 +24,22 @@ var CHIAVE = 'cassa-bar-scolastico.v1';
 var IMPRONTA_PASSWORD = '2a8981c01f050ea08357ca1a233c67f2364839bd3a45ed1afe713f64f4241d15';
 
 /* I tagli che il cliente puo' allungare. In centesimi, dai dieci centesimi ai
-   cinquanta euro. Sono nove: insieme a «Conta giusti», che ne occupa tre, riempiono
-   esatte tre righe da quattro. Cambiarne il numero vuol dire rifare quel conto
-   in stile.css, altrimenti resta un buco in fondo alla griglia. */
-var TAGLI = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+   venti euro. Sono otto: insieme a «Buono» e a «Conta giusti», che ne occupano due
+   per uno, riempiono esatte tre righe da quattro. Cambiarne il numero vuol dire
+   rifare quel conto in stile.css, altrimenti resta un buco in fondo alla griglia.
+
+   Il taglio da 50 € c'era ed e' stato tolto il 15 settembre 2026 per fare posto a
+   «Buono»: con nove tagli le dodici caselle erano gia' piene, e l'unico modo di
+   aggiungere un pulsante largo era una riga in piu' - sul telefono da 320x690
+   misurata in 122 px tolti ai prodotti, cioe' nessun prodotto intero piu'
+   visibile. Con 50 € in mano il bar non potrebbe dare il resto su una pizzetta
+   comunque: si contano i tagli piu' piccoli, o si batte «Conta giusti». */
+var TAGLI = [10, 20, 50, 100, 200, 500, 1000, 2000];
+
+/* Quanto puo' valere al massimo un buono, in centesimi: cento euro. Non e' una
+   regola della scuola, e' la rete che prende il dito scivolato sullo zero - un
+   buono da 500 euro non esiste, uno da 50,00 battuto come 500,00 si'. */
+var MASSIMO_BUONO = 10000;
 
 // Cosa c'e' al primo avvio. Sono valori d'esempio: si cambiano dalla schermata Prodotti.
 var PRODOTTI_ESEMPIO = [
@@ -52,8 +64,13 @@ function nuovoId() {
   return 'p' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
 }
 
+/* 'incasso' e' quanto si e' VENDUTO, buoni compresi: non cambia significato
+   rispetto a prima, cosi' le giornate vecchie restano vere. 'buoni' e' la parte
+   pagata coi buoni, e i contanti - quelli che devono essere nella scatola a fine
+   giornata - sono la differenza fra i due. Senza questa divisione la cassa non
+   torna, e il foglio che va alla scuola dichiara soldi che la scuola non ha visto. */
 function giornataVuota() {
-  return { data: oggi(), vendite: 0, incasso: 0, voci: {} };
+  return { data: oggi(), vendite: 0, incasso: 0, buoni: 0, voci: {} };
 }
 
 function statoIniziale() {
@@ -61,7 +78,7 @@ function statoIniziale() {
     prodotti: PRODOTTI_ESEMPIO.map(function (p) {
       return { id: nuovoId(), nome: p.nome, prezzo: p.prezzo };
     }),
-    vendita: { righe: [], contanti: 0 },
+    vendita: { righe: [], contanti: 0, buono: 0 },
     giornata: giornataVuota(),
 
     /* Le giornate chiuse DA QUESTO DISPOSITIVO, dalla piu' vecchia alla piu'
@@ -115,6 +132,19 @@ function vociBuone(grezze) {
   return pulite;
 }
 
+/* La parte di una giornata pagata coi buoni, ripulita come tutto il resto.
+
+   Una giornata scritta prima del 15 settembre 2026 non ha questo campo, e allora
+   vale zero: e' la verita', perche' i buoni non esistevano. E non puo' mai
+   superare l'incasso, perche' e' una parte di quello - se il numero che arriva
+   dice il contrario, il numero e' rotto e si scarta. */
+function quotaBuoni(g) {
+  if (!g || !Number.isFinite(g.buoni) || g.buoni <= 0) { return 0; }
+  var b = Math.round(g.buoni);
+  var totale = Number.isFinite(g.incasso) ? Math.round(g.incasso) : 0;
+  return b > totale ? totale : b;
+}
+
 function pezziDelGiorno(g) {
   var voci = g.voci || {};
   return Object.keys(voci).reduce(function (n, k) {
@@ -152,6 +182,8 @@ function carica() {
     }).map(function (r) { return { id: r.id, qta: Math.round(r.qta) }; });
     s.vendita.contanti = Number.isFinite(letto.vendita.contanti) && letto.vendita.contanti > 0
       ? Math.round(letto.vendita.contanti) : 0;
+    s.vendita.buono = Number.isFinite(letto.vendita.buono) && letto.vendita.buono > 0
+      ? Math.min(Math.round(letto.vendita.buono), MASSIMO_BUONO) : 0;
   }
 
   if (letto.giornata && typeof letto.giornata.data === 'string') {
@@ -159,6 +191,7 @@ function carica() {
       data: letto.giornata.data,
       vendite: Number.isFinite(letto.giornata.vendite) ? letto.giornata.vendite : 0,
       incasso: Number.isFinite(letto.giornata.incasso) ? letto.giornata.incasso : 0,
+      buoni: quotaBuoni(letto.giornata),
       voci: vociBuone(letto.giornata.voci)
     };
   }
@@ -177,6 +210,7 @@ function carica() {
         data: g.data,
         vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
         incasso: g.incasso,
+        buoni: quotaBuoni(g),
         voci: vociBuone(g.voci),
         automatica: !!g.automatica,
         inviata: g.inviata === true
@@ -194,6 +228,7 @@ function carica() {
         data: letto.precedente.data,
         vendite: Number.isFinite(letto.precedente.vendite) ? letto.precedente.vendite : 0,
         incasso: letto.precedente.incasso,
+        buoni: 0,
         voci: {},
         automatica: true,
         inviata: false
@@ -241,6 +276,7 @@ function archivia(giornata, automatica) {
   if (esistente) {
     esistente.vendite += giornata.vendite;
     esistente.incasso += giornata.incasso;
+    esistente.buoni = (esistente.buoni || 0) + (giornata.buoni || 0);
     sommaVoci(esistente.voci, giornata.voci);
     if (!automatica) { esistente.automatica = false; }
     esistente.inviata = false;
@@ -251,6 +287,7 @@ function archivia(giornata, automatica) {
     data: giornata.data,
     vendite: giornata.vendite,
     incasso: giornata.incasso,
+    buoni: giornata.buoni || 0,
     voci: giornata.voci,
     automatica: !!automatica,
     inviata: false
@@ -306,12 +343,13 @@ function giornateUnite(dal, al) {
     var d = per_data[g.data];
     if (!d) {
       d = per_data[g.data] = {
-        data: g.data, vendite: 0, incasso: 0, voci: {},
+        data: g.data, vendite: 0, incasso: 0, buoni: 0, voci: {},
         automatica: false, da_inviare: false
       };
     }
     d.vendite += g.vendite;
     d.incasso += g.incasso;
+    d.buoni += quotaBuoni(g);
     d.automatica = d.automatica || !!g.automatica;
     d.da_inviare = d.da_inviare || !!non_inviata;
     sommaVoci(d.voci, g.voci);
@@ -596,6 +634,34 @@ function pezziNellaVendita() {
   return righeVive().reduce(function (n, r) { return n + r.qta; }, 0);
 }
 
+/* ---------------------------------------------------------------- il buono
+
+   Un buono NON e' denaro: lo studente l'ha guadagnato facendo qualcosa, e quando
+   lo spende nella scatola non entra niente. Da qui le tre regole qui sotto, che
+   stanno in un posto solo perche' il conto non si ripeta in giro per il file.
+
+   Il buono si applica SEMPRE per primo contro il totale. Cosi' il risultato non
+   dipende dall'ordine dei tocchi: che il cassiere batta prima i tagli o prima il
+   buono, quello che lo studente deve tirare fuori e' lo stesso. */
+function buonoUsato() {
+  var t = totale();
+  return stato.vendita.buono > t ? t : stato.vendita.buono;
+}
+
+function daPagareInContanti() {
+  return totale() - buonoUsato();
+}
+
+/* Quello che avanza sul buono. Non e' un resto da dare: e' il valore che il buono
+   si porta dietro da quel momento in poi, e si scrive a penna sul buono di carta
+   prima di restituirlo. Se finisse nel riquadro grande del resto - quello verde,
+   che vuol dire «ridai questi soldi» - uno studente con la fila davanti tirerebbe
+   fuori dalla cassa contanti veri per un buono che nessuno ha pagato. */
+function restoDelBuono() {
+  var avanzo = stato.vendita.buono - totale();
+  return avanzo > 0 ? avanzo : 0;
+}
+
 // --------------------------------------------------------------- schermo
 
 function $(sel) { return document.querySelector(sel); }
@@ -669,8 +735,17 @@ function disegnaConto() {
 
   if (vive.length === 0) {
     var li = document.createElement('li');
-    li.className = 'riga-vuota';
-    li.textContent = 'Tocca un prodotto per cominciare';
+    /* Subito dopo un incasso in cui e' avanzato qualcosa sul buono, questa riga
+       dice cosa scriverci sopra. E' il punto dove l'occhio va da solo appena la
+       vendita si chiude, e non costa niente perche' la riga c'era gia'. Sparisce
+       al primo tocco della vendita dopo. */
+    if (promemoria_buono > 0) {
+      li.className = 'riga-vuota promemoria';
+      li.textContent = 'Scrivi ' + euro(promemoria_buono) + ' sul buono.';
+    } else {
+      li.className = 'riga-vuota';
+      li.textContent = 'Tocca un prodotto per cominciare';
+    }
     righe.appendChild(li);
   } else {
     vive.forEach(function (r) {
@@ -707,38 +782,87 @@ function disegnaConto() {
   }
 
   var da_pagare = totale();
+  var in_contanti = daPagareInContanti();
   var dati = stato.vendita.contanti;
 
   $('#totale').textContent = euro(da_pagare);
   $('#ricevuto').textContent = euro(dati);
+  disegnaBuono();
 
   var riquadro = $('#resto');
   var cifra = $('#resto-cifra');
   riquadro.className = 'resto';
 
+  /* Nel riquadro grande ci va SEMPRE e SOLO il denaro: quello che il cassiere
+     deve restituire, o quello che manca. Quello che avanza sul buono sta sul
+     pulsante del buono, perche' non e' denaro e non deve uscire dalla cassa.
+     Tutti i conti qui sotto si fanno sulla parte in contanti, non sul totale. */
   if (da_pagare === 0) {
     cifra.textContent = '—';
     $('#resto .resto-etichetta').textContent = 'Resto';
+  } else if (dati === 0 && in_contanti === 0) {
+    // Il buono copre tutta la spesa: non si tocca un soldo.
+    riquadro.classList.add('col-buono');
+    $('#resto .resto-etichetta').textContent = 'Pagato col buono';
+    cifra.textContent = 'niente';
   } else if (dati === 0) {
     cifra.textContent = '—';
     $('#resto .resto-etichetta').textContent = 'Resto';
-  } else if (dati < da_pagare) {
+  } else if (dati < in_contanti) {
     riquadro.classList.add('manca');
     $('#resto .resto-etichetta').textContent = 'Mancano';
-    cifra.textContent = euro(da_pagare - dati);
-  } else if (dati === da_pagare) {
+    cifra.textContent = euro(in_contanti - dati);
+  } else if (dati === in_contanti) {
     riquadro.classList.add('pari');
     $('#resto .resto-etichetta').textContent = 'Resto';
     cifra.textContent = 'niente';
   } else {
+    /* Contanti battuti e poi coperti da un buono arrivato dopo: 'in_contanti' e'
+       sceso a zero e qui viene fuori da solo che vanno restituiti tutti. Non
+       serve un caso apposta, lo dice la formula. */
     riquadro.classList.add('da-dare');
     $('#resto .resto-etichetta').textContent = 'Resto';
-    cifra.textContent = euro(dati - da_pagare);
+    cifra.textContent = euro(dati - in_contanti);
   }
 
-  // Non si incassa a vuoto, e non si incassa se i soldi sul banco non bastano.
-  $('#incassa').disabled = (da_pagare === 0) || (dati > 0 && dati < da_pagare);
-  $('#annulla').disabled = (da_pagare === 0 && dati === 0);
+  // Non si incassa a vuoto, e non si incassa se i soldi sul banco non bastano a
+  // coprire quello che il buono non copre.
+  $('#incassa').disabled = (da_pagare === 0) || (dati > 0 && dati < in_contanti);
+  $('#annulla').disabled = (da_pagare === 0 && dati === 0 && stato.vendita.buono === 0);
+}
+
+/* La faccia del pulsante del buono: l'importo sopra, quello che resta sotto.
+
+   Il numero sta attaccato alla cosa a cui appartiene, e soprattutto nel conto non
+   compare nessuna riga nuova quando si conferma un buono. Se comparisse, i tasti
+   dei tagli e «Incassa» si sposterebbero di un paio di centimetri sotto il dito
+   di chi sta battendo - ed e' la cosa che questa app non fa mai, § «Il telefono e
+   il computer» nella scheda dell'aspetto. */
+function disegnaBuono() {
+  var b = $('#taglio-buono');
+  if (!b) { return; }
+
+  var buono = stato.vendita.buono;
+  var resta = restoDelBuono();
+
+  b.textContent = '';
+  b.classList.toggle('acceso', buono > 0);
+
+  var sopra = document.createElement('span');
+  sopra.textContent = buono > 0 ? 'Buono ' + euro(buono) : 'Buono';
+  b.appendChild(sopra);
+
+  if (resta > 0) {
+    var sotto = document.createElement('span');
+    sotto.className = 'taglio-resto';
+    sotto.textContent = 'restano ' + euro(resta);
+    b.appendChild(sotto);
+  }
+
+  b.setAttribute('aria-label', buono === 0
+    ? 'Paga con un buono'
+    : 'Buono da ' + euro(buono) +
+      (resta > 0 ? ', ne restano ' + euro(resta) : '') + '. Tocca per cambiarlo.');
 }
 
 function disegnaGiornata() {
@@ -750,34 +874,50 @@ function disegnaGiornata() {
 
   /* Quanto ha fatto QUESTO dispositivo oggi: la cassa aperta adesso piu' quello che
      ha gia' archiviato oggi, se la cassa era gia' stata chiusa una volta. */
-  var mio = { vendite: g.vendite, incasso: g.incasso, voci: {} };
+  var mio = { vendite: g.vendite, incasso: g.incasso, buoni: g.buoni || 0, voci: {} };
   sommaVoci(mio.voci, g.voci);
   stato.mio.forEach(function (x) {
     if (x.data !== g.data) { return; }
     mio.vendite += x.vendite;
     mio.incasso += x.incasso;
+    mio.buoni += quotaBuoni(x);
     sommaVoci(mio.voci, x.voci);
   });
 
   // Quanto ha fatto il BAR oggi: il mio piu' quello degli altri dispositivi.
-  var tutti = { vendite: mio.vendite, incasso: mio.incasso, voci: {} };
+  var tutti = { vendite: mio.vendite, incasso: mio.incasso, buoni: mio.buoni, voci: {} };
   sommaVoci(tutti.voci, mio.voci);
 
   var altri = giornateAltrui(g.data);
   altri.forEach(function (x) {
     tutti.vendite += x.vendite;
     tutti.incasso += x.incasso;
+    tutti.buoni += quotaBuoni(x);
     sommaVoci(tutti.voci, x.voci);
   });
 
   $('#incasso-oggi').textContent = euro(tutti.incasso);
   $('#vendite-oggi').textContent = String(tutti.vendite);
 
-  /* La riga piccola compare solo quando c'e' davvero qualcun altro: se batte cassa
-     un dispositivo solo, ripetere due volte lo stesso numero confonde e basta. */
-  $('#incasso-mio').textContent = altri.length > 0
-    ? 'di cui su questo dispositivo ' + euro(mio.incasso)
-    : '';
+  /* La riga piccola dice due cose, e ognuna compare solo quando serve davvero.
+
+     La divisione fra contanti e buoni e' quella che permette di contare la
+     scatola a fine giornata: il numero grande e' quanto si e' VENDUTO, e i buoni
+     non sono soldi entrati. Senza questa riga, chi conta i contanti troverebbe
+     meno di quello che l'app dichiara e non saprebbe perche'.
+
+     Quanto ha fatto questo dispositivo compare solo se ce n'e' davvero un altro:
+     se batte cassa un dispositivo solo, ripetere due volte lo stesso numero
+     confonde e basta. */
+  var note_oggi = [];
+  if (tutti.buoni > 0) {
+    note_oggi.push('di cui ' + euro(tutti.incasso - tutti.buoni) + ' in contanti e ' +
+                   euro(tutti.buoni) + ' in buoni');
+  }
+  if (altri.length > 0) {
+    note_oggi.push('su questo dispositivo ' + euro(mio.incasso));
+  }
+  $('#incasso-mio').textContent = note_oggi.join(' · ');
 
   var chiavi = Object.keys(tutti.voci);
   var pezzi_totali = riempiTabella($('#tabella-pezzi').querySelector('tbody'), tutti.voci);
@@ -839,10 +979,11 @@ function riempiTabella(corpo, voci) {
 function totaliAnno(giorni) {
   return giorni.reduce(function (t, g) {
     t.incasso += g.incasso;
+    t.buoni += quotaBuoni(g);
     t.vendite += g.vendite;
     t.pezzi += pezziDelGiorno(g);
     return t;
-  }, { incasso: 0, vendite: 0, pezzi: 0 });
+  }, { incasso: 0, buoni: 0, vendite: 0, pezzi: 0 });
 }
 
 function rigaGiorno(g) {
@@ -925,7 +1066,11 @@ function corpoGiorno(g) {
   var riga = document.createElement('p');
   riga.className = 'spiega';
   riga.textContent = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
-    ' · incasso ' + euro(g.incasso);
+    ' · incasso ' + euro(g.incasso) +
+    (quotaBuoni(g) > 0
+      ? ' · di cui ' + euro(g.incasso - quotaBuoni(g)) + ' in contanti e ' +
+        euro(quotaBuoni(g)) + ' in buoni'
+      : '');
   box.appendChild(riga);
 
   /* Sta PRIMA di «Togli questa giornata» apposta: la cosa innocua per prima, quella
@@ -1025,6 +1170,10 @@ function disegnaStorico() {
 
   $('#titolo-anno').textContent = 'Anno scolastico ' + annoCorrente();
   $('#incasso-anno').textContent = euro(t.incasso);
+  // Compare solo se in tutto l'anno qualcuno ha pagato con un buono.
+  $('#incasso-anno-buoni').textContent = t.buoni > 0
+    ? 'di cui ' + euro(t.incasso - t.buoni) + ' in contanti e ' + euro(t.buoni) + ' in buoni'
+    : '';
   $('#giorni-anno').textContent = String(giorni.length);
   $('#vendite-anno').textContent = String(t.vendite);
 
@@ -1092,14 +1241,22 @@ function riepilogoAnno() {
 
   r.push('Bar scolastico - riepilogo anno ' + anno);
   r.push('');
-  r.push('Giorno;Data;Vendite;Pezzi;Incasso');
+  /* «Incasso» resta quanto si e' VENDUTO e resta dov'era: le due colonne nuove si
+     aggiungono in fondo, cosi' un file vecchio e uno nuovo restano confrontabili.
+     «Contanti» e' quello che deve esserci nella scatola; «Buoni» e' la parte che
+     nella scatola non e' mai entrata perche' nessuno l'ha pagata. Senza questa
+     divisione il foglio dichiarerebbe alla scuola soldi che la scuola non ha visto. */
+  r.push('Giorno;Data;Vendite;Pezzi;Incasso;Contanti;Buoni');
 
   giorni.forEach(function (g) {
+    var b = quotaBuoni(g);
     r.push(campo(dataLunga(g.data, true)) + ';' + g.data + ';' + g.vendite + ';' +
-           pezziDelGiorno(g) + ';' + virgola(g.incasso));
+           pezziDelGiorno(g) + ';' + virgola(g.incasso) + ';' +
+           virgola(g.incasso - b) + ';' + virgola(b));
   });
 
-  r.push('TOTALE;;' + t.vendite + ';' + t.pezzi + ';' + virgola(t.incasso));
+  r.push('TOTALE;;' + t.vendite + ';' + t.pezzi + ';' + virgola(t.incasso) + ';' +
+         virgola(t.incasso - t.buoni) + ';' + virgola(t.buoni));
   r.push('');
   r.push('Dettaglio per prodotto');
   r.push('Data;Prodotto;Pezzi;Incasso');
@@ -1151,10 +1308,20 @@ function scaricaGiornataWord(data) {
     { tipo: 'sottotitolo',
       testo: 'Riepilogo della giornata · anno scolastico ' + annoCorrente() },
     { tipo: 'giorno', testo: giorno.charAt(0).toUpperCase() + giorno.slice(1) },
-    { tipo: 'forte', testo: 'Incasso della giornata: ' + euro(g.incasso) },
-    { tipo: 'riga', testo: g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
-        ' · ' + pezzi + (pezzi === 1 ? ' pezzo' : ' pezzi') }
+    { tipo: 'forte', testo: 'Incasso della giornata: ' + euro(g.incasso) }
   ];
+
+  /* Su un foglio che gira fuori dall'app questa riga conta piu' che altrove: dice
+     che il numero grande e' quanto si e' venduto, e che una parte non e' denaro
+     entrato in cassa. Compare solo se quel giorno qualcuno ha pagato con un buono. */
+  var in_buoni = quotaBuoni(g);
+  if (in_buoni > 0) {
+    blocchi.push({ tipo: 'riga', testo: 'Di cui ' + euro(g.incasso - in_buoni) +
+      ' in contanti e ' + euro(in_buoni) + ' in buoni.' });
+  }
+
+  blocchi.push({ tipo: 'riga', testo: g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
+    ' · ' + pezzi + (pezzi === 1 ? ' pezzo' : ' pezzi') });
 
   /* Le stesse due note che si vedono sulla riga dello Storico. Su un foglio che gira
      fuori dall'app contano di piu': dicono perche' quel numero potrebbe non essere
@@ -1283,8 +1450,14 @@ function disegnaTutto() {
 // L'ultimo prodotto toccato, in piu' o in meno: serve a tenerlo in vista nella lista.
 var ultimo_toccato = null;
 
+/* Quanto e' avanzato sul buono dell'ultima vendita incassata. Vive il tempo che
+   passa fra «Incassa» e il primo tocco della vendita dopo, e serve solo a
+   ricordare di scriverlo sul buono prima di restituirlo. */
+var promemoria_buono = 0;
+
 function aggiungiPezzo(id) {
   if (!prodottoCon(id)) { return; }
+  promemoria_buono = 0;
   ultimo_toccato = id;
   var trovata = false;
   stato.vendita.righe.forEach(function (r) {
@@ -1328,7 +1501,8 @@ function togliPezzo(id) {
 
 function svuotaVendita() {
   ultimo_toccato = null;
-  stato.vendita = { righe: [], contanti: 0 };
+  promemoria_buono = 0;
+  stato.vendita = { righe: [], contanti: 0, buono: 0 };
   salva();
   disegnaTutto();
 }
@@ -1341,8 +1515,13 @@ function incassa() {
   var da_pagare = totale();
   if (da_pagare === 0) { return; }
 
+  var in_contanti = daPagareInContanti();
   var dati = stato.vendita.contanti;
-  if (dati > 0 && dati < da_pagare) { return; }
+  if (dati > 0 && dati < in_contanti) { return; }
+
+  /* Si leggono PRIMA di svuotare la vendita: dopo non c'e' piu' niente da leggere. */
+  var col_buono = buonoUsato();
+  var resta_sul_buono = restoDelBuono();
 
   incasso_in_corso = true;
   window.setTimeout(function () { incasso_in_corso = false; }, 600);
@@ -1361,7 +1540,17 @@ function incassa() {
   stato.giornata.vendite += 1;
   stato.giornata.incasso += da_pagare;
 
+  /* 'incasso' resta quanto si e' VENDUTO, buoni compresi. Quanto e' finito nella
+     scatola sono i contanti, cioe' la differenza: e' l'unico modo perche' a fine
+     giornata il denaro contato torni con quello che l'app dichiara. */
+  stato.giornata.buoni += col_buono;
+
   svuotaVendita();
+
+  if (resta_sul_buono > 0) {
+    promemoria_buono = resta_sul_buono;
+    disegnaConto();
+  }
 }
 
 // --------------------------------------------------------------- schede
@@ -1403,12 +1592,96 @@ function costruisciTagli() {
     contenitore.appendChild(b);
   });
 
+  /* «Buono» e «Conta giusti» dividono l'ultima riga, due caselle per uno: coi
+     nove tagli fanno dodici caselle esatte, cioe' tre righe piene su quattro
+     colonne, senza buchi e senza un pixel d'altezza in piu'. Una riga tutta per
+     «Buono» sarebbero 56 px di tasto piu' il divario, e quei pixel li pagherebbe
+     la griglia dei prodotti, che vive dell'avanzo. */
+  var buono = document.createElement('button');
+  buono.type = 'button';
+  buono.className = 'taglio buono';
+  buono.id = 'taglio-buono';
+  contenitore.appendChild(buono);
+
   var esatto = document.createElement('button');
   esatto.type = 'button';
   esatto.className = 'taglio esatto';
   esatto.id = 'taglio-esatto';
   esatto.textContent = 'Conta giusti';
   contenitore.appendChild(esatto);
+
+  disegnaBuono();
+}
+
+/* --------------------------------------------------------------- il tastierino
+
+   L'unica cosa che si digita in tutta l'app. Non e' un campo di testo: la
+   tastiera del telefono coprirebbe meta' schermo - cioe' i prodotti e «Incassa» -
+   e in dieci minuti d'intervallo quello e' un difetto, non un dettaglio. Tasti
+   grandi come tutti gli altri, e le cifre che entrano da destra come su una cassa
+   vera: 5 0 0 fa 5,00 €.
+
+   Sul PC funziona anche la tastiera di sistema, perche' li' non copre niente. */
+var cifre_battute = '';
+
+function costruisciTastierino() {
+  var contenitore = $('#tastierino-tasti');
+  contenitore.textContent = '';
+
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'cancella'].forEach(function (c) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tasto' + (c === '0' ? ' zero' : '') + (c === 'cancella' ? ' cancella' : '');
+    b.dataset.cifra = c;
+    b.textContent = c === 'cancella' ? '⌫' : c;
+    if (c === 'cancella') { b.setAttribute('aria-label', 'Cancella l’ultima cifra'); }
+    contenitore.appendChild(b);
+  });
+}
+
+function mostraCifreBattute() {
+  $('#tastierino-cifra').textContent = euro(Number(cifre_battute || '0'));
+}
+
+/* Gli zeri in testa si buttano via appena battuti, cosi' «0 0 5» e «5» sono la
+   stessa cosa. Una cifra che porterebbe sopra il tetto non entra e basta: il
+   numero sullo schermo resta quello di prima invece di diventare assurdo. */
+function battiCifra(c) {
+  if (c === 'cancella') {
+    cifre_battute = cifre_battute.slice(0, -1);
+    mostraCifreBattute();
+    return;
+  }
+
+  var prova = (cifre_battute + c).replace(/^0+/, '');
+  if (Number(prova || '0') > MASSIMO_BUONO) { return; }
+
+  cifre_battute = prova;
+  mostraCifreBattute();
+}
+
+function apriTastierino() {
+  sfondoInerte(true);
+  cifre_battute = '';
+  mostraCifreBattute();
+  // «Togli il buono» c'e' solo se c'e' qualcosa da togliere.
+  $('#tastierino-togli').hidden = stato.vendita.buono === 0;
+  $('#tastierino').hidden = false;
+  window.setTimeout(function () { $('#tastierino-ok').focus(); }, 60);
+}
+
+function chiudiTastierino() {
+  $('#tastierino').hidden = true;
+  cifre_battute = '';
+  sfondoInerte(false);
+}
+
+function scegliBuono(centesimi) {
+  stato.vendita.buono = centesimi;
+  promemoria_buono = 0;
+  chiudiTastierino();
+  salva();
+  disegnaConto();
 }
 
 function collegaEventi() {
@@ -1429,8 +1702,14 @@ function collegaEventi() {
   $('#tagli').addEventListener('click', function (e) {
     var b = e.target.closest('.taglio');
     if (!b) { return; }
+    if (b.id === 'taglio-buono') {
+      apriTastierino();
+      return;
+    }
     if (b.id === 'taglio-esatto') {
-      stato.vendita.contanti = totale();
+      /* «Conta giusti» vuol dire «mi ha dato esatto quello che deve»: quello che
+         deve e' la parte che il buono non copre, non il totale della spesa. */
+      stato.vendita.contanti = daPagareInContanti();
     } else {
       stato.vendita.contanti += parseInt(b.dataset.taglio, 10);
     }
@@ -1438,14 +1717,49 @@ function collegaEventi() {
     disegnaConto();
   });
 
+  /* Azzera i CONTANTI, come dice il suo nome, e non tocca il buono. Se li
+     azzerasse tutti e due, un cassiere che corregge un taglio battuto per sbaglio
+     si porterebbe via anche il buono senza accorgersene, e allo studente
+     verrebbe chiesto tutto in contanti. Il buono si toglie dal suo tastierino,
+     dietro un tocco deliberato. */
   $('#azzera-contanti').addEventListener('click', function () {
     stato.vendita.contanti = 0;
     salva();
     disegnaConto();
   });
 
+  // --------------------------------------------------------- il tastierino
+
+  $('#tastierino-tasti').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-cifra]');
+    if (b) { battiCifra(b.dataset.cifra); }
+  });
+
+  $('#tastierino-ok').addEventListener('click', function () {
+    scegliBuono(Number(cifre_battute || '0'));
+  });
+
+  $('#tastierino-togli').addEventListener('click', function () { scegliBuono(0); });
+  $('#tastierino-lascia').addEventListener('click', chiudiTastierino);
+
+  /* Sul PC la tastiera vera non copre niente, quindi tanto vale che funzioni.
+     Invio e' gestito qui e non lasciato al pulsante che ha il fuoco: se il fuoco
+     fosse rimasto su una cifra, Invio ribatterebbe quella cifra invece di
+     confermare. */
+  document.addEventListener('keydown', function (e) {
+    if ($('#tastierino').hidden) { return; }
+
+    if (e.key >= '0' && e.key <= '9') { e.preventDefault(); battiCifra(e.key); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); battiCifra('cancella'); return; }
+    if (e.key === 'Enter') { e.preventDefault(); scegliBuono(Number(cifre_battute || '0')); return; }
+    if (e.key === 'Escape') { e.preventDefault(); chiudiTastierino(); }
+  });
+
+  /* La conferma guarda anche il buono: prima guardava solo i pezzi, e un buono
+     appena battuto sarebbe sparito in silenzio - cioe' allo studente sarebbe
+     stato chiesto tutto in contanti senza che nessuno se ne accorgesse. */
   $('#annulla').addEventListener('click', function () {
-    if (pezziNellaVendita() > 0) {
+    if (pezziNellaVendita() > 0 || stato.vendita.buono > 0) {
       if (!window.confirm('Butto via questa vendita e ricomincio?')) { return; }
     }
     svuotaVendita();
@@ -1738,6 +2052,7 @@ function avvia() {
   stato = carica();
   allineaGiornata();
   costruisciTagli();
+  costruisciTastierino();
   collegaEventi();
   collegaServiceWorker();
 

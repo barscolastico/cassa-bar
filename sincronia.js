@@ -239,6 +239,9 @@ window.Sincronia = {
       data: g.data,
       vendite: g.vendite,
       incasso: g.incasso,
+      // La parte pagata coi buoni. Un server vecchio la ignora e la mette a zero:
+      // e' il motivo per cui il server si aggiorna PRIMA dell'app, non dopo.
+      buoni: g.buoni || 0,
       voci: g.voci,
       automatica: !!g.automatica
     });
