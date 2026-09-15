@@ -772,11 +772,15 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 .tasto.zero { grid-column: span 2; }
 .tasto.cancella { color: var(--testo-tenue); }
 
-/* Stesso posto di «Annulla» e «Incassa» nel conto - la scelta leggera a sinistra,
-   quella che conferma a destra - ma metà e metà, non un terzo e due terzi: qui
-   nessuna delle due tocca i soldi, e su uno schermo da 320 px «Lascia stare» in un
-   terzo di riga andrebbe a capo dentro il pulsante. */
-.tastierino-azioni { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* Le stesse proporzioni di «Annulla» e «Incassa» nel conto: la scelta leggera a
+   sinistra e stretta, quella che conferma a destra e larga. Due pulsanti che si
+   trovano sempre nello stesso posto, con lo stesso nome e nella stessa misura,
+   non si scambiano.
+
+   Fra il 15 settembre 2026 e poche ore dopo sono stati metà e metà, perché il
+   pulsante si chiamava «Lascia stare» e in un terzo di riga, su uno schermo da
+   320 px, andava a capo dentro il pulsante. Col nome corto il motivo non c'è più. */
+.tastierino-azioni { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
 
 .btn-togli-buono {
   width: 100%;
