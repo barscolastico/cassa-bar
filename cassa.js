@@ -784,6 +784,23 @@ function disegnaConto() {
   var da_pagare = totale();
   var in_contanti = daPagareInContanti();
   var dati = stato.vendita.contanti;
+  var buono = stato.vendita.buono;
+
+  /* Quando i contanti sul banco non bastano a coprire quello che il buono non
+     copre. La condizione ha due strade perche' uno zero vuol dire due cose
+     diverse:
+
+     - senza buono, «contanti a zero» vuol dire «non li ho contati». Battere i
+       tagli non e' mai stato obbligatorio: si prendono i soldi e si incassa. Se
+       lo zero bloccasse la vendita, ogni pizzetta pagata con la moneta giusta
+       costerebbe un tocco in piu', con la fila davanti;
+     - con un buono, invece, il cassiere ha gia' dichiarato COME si paga, e la
+       parte che il buono non copre deve risultare. Li' lo zero e' un buco.
+
+     Senza questa distinzione, un buono da 5,00 € su un ordine da 7,50 € lasciava
+     «Incassa» acceso: la vendita passava e la giornata registrava 2,50 € di
+     contanti che nella scatola non erano mai entrati. */
+  var mancano_contanti = (dati > 0 || buono > 0) && dati < in_contanti;
 
   $('#totale').textContent = euro(da_pagare);
   $('#ricevuto').textContent = euro(dati);
@@ -805,13 +822,15 @@ function disegnaConto() {
     riquadro.classList.add('col-buono');
     $('#resto .resto-etichetta').textContent = 'Pagato col buono';
     cifra.textContent = 'niente';
-  } else if (dati === 0) {
-    cifra.textContent = '—';
-    $('#resto .resto-etichetta').textContent = 'Resto';
-  } else if (dati < in_contanti) {
+  } else if (mancano_contanti) {
+    /* Sta PRIMA del caso «zero contanti» apposta: col buono in ballo, zero non
+       vuol dire «non li ho contati», vuol dire che manca la differenza. */
     riquadro.classList.add('manca');
     $('#resto .resto-etichetta').textContent = 'Mancano';
     cifra.textContent = euro(in_contanti - dati);
+  } else if (dati === 0) {
+    cifra.textContent = '—';
+    $('#resto .resto-etichetta').textContent = 'Resto';
   } else if (dati === in_contanti) {
     riquadro.classList.add('pari');
     $('#resto .resto-etichetta').textContent = 'Resto';
@@ -825,9 +844,8 @@ function disegnaConto() {
     cifra.textContent = euro(dati - in_contanti);
   }
 
-  // Non si incassa a vuoto, e non si incassa se i soldi sul banco non bastano a
-  // coprire quello che il buono non copre.
-  $('#incassa').disabled = (da_pagare === 0) || (dati > 0 && dati < in_contanti);
+  // Non si incassa a vuoto, e non si incassa se i soldi sul banco non bastano.
+  $('#incassa').disabled = (da_pagare === 0) || mancano_contanti;
   $('#annulla').disabled = (da_pagare === 0 && dati === 0 && stato.vendita.buono === 0);
 }
 
@@ -1517,7 +1535,11 @@ function incassa() {
 
   var in_contanti = daPagareInContanti();
   var dati = stato.vendita.contanti;
-  if (dati > 0 && dati < in_contanti) { return; }
+
+  /* La stessa condizione del pulsante, ripetuta qui perche' il pulsante e' un
+     avviso e questo e' la serratura: chi arrivasse a chiamare 'incassa' per
+     un'altra strada non deve poter registrare soldi che nessuno ha dato. */
+  if ((dati > 0 || stato.vendita.buono > 0) && dati < in_contanti) { return; }
 
   /* Si leggono PRIMA di svuotare la vendita: dopo non c'e' piu' niente da leggere. */
   var col_buono = buonoUsato();
