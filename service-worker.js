@@ -8,7 +8,7 @@
    al browser «la copia che tieni e' vecchia, riscaricala». Senza, chi l'ha gia'
    installata resta per sempre alla versione di prima.  */
 
-var VERSIONE = 'cassa-bar-12';
+var VERSIONE = 'cassa-bar-13';
 
 var FILE = [
   './',

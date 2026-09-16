@@ -429,10 +429,68 @@ function giornateAltrui(data) {
   });
 }
 
+/* Quante giornate al massimo risponde il server in una lettura. Se ne tornassero
+   esattamente tante, la risposta potrebbe essere stata tagliata, e allora «il server
+   non la nomina» non vorrebbe piu' dire «li' non c'e'». */
+var TETTO_GIORNATE_SERVER = 2000;
+
+/* Una giornata mia che il server ha gia' ricevuto, e che adesso non nomina piu', li' e'
+   stata tolta: annullata da un altro dispositivo, o cancellata dal pannello. Va tolta
+   anche qui.
+
+   Senza questa regola non se ne andava piu': «Togli questa giornata dai conti» toglie la
+   riga soltanto dal dispositivo su cui si preme, e su tutti gli altri che l'avevano
+   battuta restava a gonfiare i totali dell'anno. Il guaio e' che non si vedeva - su ogni
+   altro schermo i conti erano giusti, e il telefono che sbagliava era proprio quello che
+   nessuno confrontava.
+
+   Tre guardie, perche' «il server non la nomina» voglia dire davvero «non c'e' piu'» e non
+   «non gliel'ho chiesta» o «non gliel'ho ancora mandata»:
+     - si guarda solo da collegati, cioe' su una risposta arrivata adesso;
+     - solo le giornate gia' partite: quelle in coda restano, e' il loro posto;
+     - solo dentro l'anno scolastico che abbiamo chiesto, e solo se la risposta non e'
+       stata tagliata dal tetto.
+
+   Il prezzo, scritto perche' non sia una sorpresa il giorno che capita: se il server
+   perdesse una giornata, i dispositivi la butterebbero dietro di lui. E' la stessa scelta
+   di sempre - lo storico e' del server, qui c'e' una coda - e vale perche' l'altro modo
+   sbaglia in silenzio, e questo no. */
+function dimenticaGiornateTolte() {
+  if (!window.Sincronia.configurato() || !window.Sincronia.collegato()) { return false; }
+
+  var righe = window.Sincronia.giornate();
+  if (righe.length >= TETTO_GIORNATE_SERVER) { return false; }
+
+  var mio_codice = window.Sincronia.dispositivo();
+  var sul_server = {};
+  righe.forEach(function (g) {
+    if (g.dispositivo === mio_codice) { sul_server[g.data] = true; }
+  });
+
+  var e = estremiAnno(annoCorrente());
+  var prima = stato.mio.length;
+
+  stato.mio = stato.mio.filter(function (g) {
+    if (!g.inviata) { return true; }
+    if (g.data < e.dal || g.data > e.al) { return true; }
+    return sul_server[g.data] === true;
+  });
+
+  if (stato.mio.length === prima) { return false; }
+  salva();
+  return true;
+}
+
 // --------------------------------------------------------------- la coda d'invio
 
 var invio_in_corso = false;
 var coda_da_rifare = false;
+
+/* I giorni che il server ha preso e messo fuori dai conti mentre l'app era aperta. Non si
+   salvano da nessuna parte: servono a dirlo una volta a chi sta guardando lo schermo,
+   perche' una giornata che esce dai totali senza che nessuno lo dica e' esattamente il
+   modo in cui i soldi della scuola si perdono di vista. */
+var tolte_dal_server = [];
 
 /* Le giornate mie che non sono ancora arrivate al server. Si riprova a ogni giro di
    controllo e a ogni rientro nell'app: chiudere la cassa senza rete non deve far
@@ -451,10 +509,25 @@ function spingiCoda() {
 
   invio_in_corso = true;
 
+  var quante_tolte = tolte_dal_server.length;
+
   return rimaste.reduce(function (catena, g) {
     return catena.then(function () {
-      return window.Sincronia.mandaGiornata(g).then(function () {
-        g.inviata = true;
+      return window.Sincronia.mandaGiornata(g).then(function (esito) {
+        /* Il server risponde due cose diverse. «Presa»: la giornata e' partita e la copia
+           resta qui. Oppure «presa, ma quel giorno era stato tolto dai conti»: la riga
+           la' e' scritta e si puo' rimettere, e qui non deve restare - se restasse
+           continuerebbe a contare su questo dispositivo e su nessun altro, che e'
+           precisamente il guaio che si sta chiudendo.
+
+           Si manda comunque, e non si butta prima: cosi' nemmeno una giornata tolta
+           sparisce senza essere passata dal server. */
+        if (esito && esito.annullata) {
+          stato.mio = stato.mio.filter(function (x) { return x !== g; });
+          tolte_dal_server.push(g.data);
+        } else {
+          g.inviata = true;
+        }
         salva();
       });
     });
@@ -462,6 +535,7 @@ function spingiCoda() {
     // Linea persa a meta': quelle che restano riprovano al giro dopo.
   }).then(function () {
     invio_in_corso = false;
+    if (tolte_dal_server.length !== quante_tolte) { ridisegnaQuelloCheSiVede(); }
     if (!coda_da_rifare) { return; }
     coda_da_rifare = false;
     return spingiCoda();
@@ -531,6 +605,20 @@ function descriviRete(nodo) {
     nodo.textContent = 'Server non impostato: i conti restano su questo dispositivo, ' +
       'non si vedono altrove, e da qui si può cambiare tutto. È l’app di prima. ' +
       'Per collegare i dispositivi si scrive l’indirizzo del server in sincronia.js.';
+    return;
+  }
+
+  /* Prima di tutto il resto, se e' successo: una giornata e' arrivata al server e li' e'
+     rimasta fuori dai conti, perche' quel giorno era stato tolto. E' piu' importante di
+     sapere se siamo collegati - sono soldi battuti che non entrano in nessun totale - e
+     la riga lo dice finche' l'app resta aperta. */
+  if (tolte_dal_server.length > 0) {
+    nodo.classList.add('attenzione');
+    nodo.textContent = tolte_dal_server.length === 1
+      ? 'La cassa di ' + dataLunga(tolte_dal_server[0]) + ' è arrivata al server, ma quel ' +
+        'giorno era stato tolto dai conti: là resta scritta e si può rimettere, nei totali no.'
+      : tolte_dal_server.length + ' giornate sono arrivate al server, ma quei giorni erano ' +
+        'stati tolti dai conti: là restano scritte e si possono rimettere, nei totali no.';
     return;
   }
 
@@ -2235,6 +2323,11 @@ function ridisegnaQuelloCheSiVede() {
 
 function arrivanoNotizie() {
   var listino_cambiato = adottaProdotti();
+
+  // Prima di rimandare qualcosa: le mie giornate che la' non ci sono piu' si tolgono
+  // anche di qui, se no restano per sempre a gonfiare i totali di questo dispositivo.
+  dimenticaGiornateTolte();
+
   spingiCoda();
 
   /* Il primo dispositivo autorizzato che si collega porta sul server il listino che
