@@ -64,13 +64,20 @@ function nuovoId() {
   return 'p' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
 }
 
-/* 'incasso' e' quanto si e' VENDUTO, buoni compresi: non cambia significato
-   rispetto a prima, cosi' le giornate vecchie restano vere. 'buoni' e' la parte
-   pagata coi buoni, e i contanti - quelli che devono essere nella scatola a fine
-   giornata - sono la differenza fra i due. Senza questa divisione la cassa non
-   torna, e il foglio che va alla scuola dichiara soldi che la scuola non ha visto. */
+/* 'incasso' e' quanto si e' VENDUTO, buoni e crediti compresi: non cambia
+   significato rispetto a prima, cosi' le giornate vecchie restano vere.
+
+   'buoni' e 'crediti' sono due PARTI di quello, mai qualcosa che gli si aggiunge:
+   il buono che nessuno ha pagato, e la merce uscita dal banco senza denaro. I
+   contanti - quelli che devono essere nella scatola a fine giornata - sono quello
+   che resta:
+
+     contanti = incasso - buoni - crediti
+
+   Senza questa divisione la cassa non torna, e il foglio che va alla scuola
+   dichiara soldi che la scuola non ha visto. */
 function giornataVuota() {
-  return { data: oggi(), vendite: 0, incasso: 0, buoni: 0, voci: {} };
+  return { data: oggi(), vendite: 0, incasso: 0, buoni: 0, crediti: 0, voci: {} };
 }
 
 function statoIniziale() {
@@ -145,6 +152,41 @@ function quotaBuoni(g) {
   return b > totale ? totale : b;
 }
 
+/* La parte di una giornata uscita dal banco senza denaro: la merce data a credito.
+   Stessa storia dei buoni, con una differenza che conta: il tetto non e' l'incasso
+   ma QUELLO CHE RESTA dopo i buoni. Se ognuno dei due si fermasse all'incasso per
+   conto suo, una giornata da 10 € con 10 € di buoni e 10 € di crediti passerebbe
+   tutti e due i controlli, e i contanti - che sono la differenza - verrebbero
+   meno dieci.
+
+   I buoni tengono la precedenza perche' sono il campo piu' vecchio: le giornate
+   che esistono hanno quello, e non deve cambiare valore da sotto. */
+function quotaCrediti(g) {
+  if (!g || !Number.isFinite(g.crediti) || g.crediti <= 0) { return 0; }
+  var c = Math.round(g.crediti);
+  var totale = Number.isFinite(g.incasso) ? Math.round(g.incasso) : 0;
+  var resta = totale - quotaBuoni(g);
+  if (resta < 0) { resta = 0; }
+  return c > resta ? resta : c;
+}
+
+/* La frase che spiega un incasso: quanto di quello che si e' venduto e' finito
+   davvero nella scatola, e quanto no. Sta in un posto solo perche' compare in
+   cinque - Giornata, Storico, il giorno aperto, il foglio Word e la chiusura di
+   cassa - e cinque copie divergono senza dirlo.
+
+   Vuota quando non c'e' niente da spiegare: un giorno pagato tutto in contanti
+   non dice niente di piu' di prima. */
+function comeSiEPagato(incasso, buoni, crediti) {
+  if (buoni === 0 && crediti === 0) { return ''; }
+
+  var pezzi = [euro(incasso - buoni - crediti) + ' in contanti'];
+  if (buoni > 0) { pezzi.push(euro(buoni) + ' in buoni'); }
+  if (crediti > 0) { pezzi.push(euro(crediti) + ' a credito'); }
+
+  return 'di cui ' + pezzi.slice(0, -1).join(', ') + ' e ' + pezzi[pezzi.length - 1];
+}
+
 function pezziDelGiorno(g) {
   var voci = g.voci || {};
   return Object.keys(voci).reduce(function (n, k) {
@@ -192,6 +234,7 @@ function carica() {
       vendite: Number.isFinite(letto.giornata.vendite) ? letto.giornata.vendite : 0,
       incasso: Number.isFinite(letto.giornata.incasso) ? letto.giornata.incasso : 0,
       buoni: quotaBuoni(letto.giornata),
+      crediti: quotaCrediti(letto.giornata),
       voci: vociBuone(letto.giornata.voci)
     };
   }
@@ -211,6 +254,7 @@ function carica() {
         vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
         incasso: g.incasso,
         buoni: quotaBuoni(g),
+        crediti: quotaCrediti(g),
         voci: vociBuone(g.voci),
         automatica: !!g.automatica,
         inviata: g.inviata === true
@@ -229,6 +273,7 @@ function carica() {
         vendite: Number.isFinite(letto.precedente.vendite) ? letto.precedente.vendite : 0,
         incasso: letto.precedente.incasso,
         buoni: 0,
+        crediti: 0,
         voci: {},
         automatica: true,
         inviata: false
@@ -277,6 +322,7 @@ function archivia(giornata, automatica) {
     esistente.vendite += giornata.vendite;
     esistente.incasso += giornata.incasso;
     esistente.buoni = (esistente.buoni || 0) + (giornata.buoni || 0);
+    esistente.crediti = (esistente.crediti || 0) + (giornata.crediti || 0);
     sommaVoci(esistente.voci, giornata.voci);
     if (!automatica) { esistente.automatica = false; }
     esistente.inviata = false;
@@ -288,6 +334,7 @@ function archivia(giornata, automatica) {
     vendite: giornata.vendite,
     incasso: giornata.incasso,
     buoni: giornata.buoni || 0,
+    crediti: giornata.crediti || 0,
     voci: giornata.voci,
     automatica: !!automatica,
     inviata: false
@@ -343,13 +390,14 @@ function giornateUnite(dal, al) {
     var d = per_data[g.data];
     if (!d) {
       d = per_data[g.data] = {
-        data: g.data, vendite: 0, incasso: 0, buoni: 0, voci: {},
+        data: g.data, vendite: 0, incasso: 0, buoni: 0, crediti: 0, voci: {},
         automatica: false, da_inviare: false
       };
     }
     d.vendite += g.vendite;
     d.incasso += g.incasso;
     d.buoni += quotaBuoni(g);
+    d.crediti += quotaCrediti(g);
     d.automatica = d.automatica || !!g.automatica;
     d.da_inviare = d.da_inviare || !!non_inviata;
     sommaVoci(d.voci, g.voci);
@@ -662,6 +710,23 @@ function restoDelBuono() {
   return avanzo > 0 ? avanzo : 0;
 }
 
+/* ---------------------------------------------------------------- il credito
+
+   Quanto resterebbe a credito se la vendita si chiudesse adesso: quello che il
+   buono non copre, meno i contanti gia' sul banco. La merce esce dal banco e il
+   denaro no - la scuola resta creditrice, e chi deve si scrive sul quaderno.
+
+   E' lo stesso numero che il riquadro grande scrive in rosso quando dice
+   «Mancano», ma il pulsante ce l'ha ANCHE QUANDO IL RIQUADRO TACE, ed e' voluto:
+   con i contanti a zero e nessun buono «Mancano» non compare, perche' li' lo zero
+   vuol dire «non li ho contati» - e quello e' proprio il caso piu' comune del
+   credito, lo studente che non ha niente in tasca. Legare il pulsante al rosso lo
+   renderebbe irraggiungibile proprio quando serve. */
+function creditoPossibile() {
+  var manca = daPagareInContanti() - stato.vendita.contanti;
+  return manca > 0 ? manca : 0;
+}
+
 // --------------------------------------------------------------- schermo
 
 function $(sel) { return document.querySelector(sel); }
@@ -739,9 +804,9 @@ function disegnaConto() {
        dice cosa scriverci sopra. E' il punto dove l'occhio va da solo appena la
        vendita si chiude, e non costa niente perche' la riga c'era gia'. Sparisce
        al primo tocco della vendita dopo. */
-    if (promemoria_buono > 0) {
+    if (promemoria) {
       li.className = 'riga-vuota promemoria';
-      li.textContent = 'Scrivi ' + euro(promemoria_buono) + ' sul buono.';
+      li.textContent = promemoria;
     } else {
       li.className = 'riga-vuota';
       li.textContent = 'Tocca un prodotto per cominciare';
@@ -805,6 +870,7 @@ function disegnaConto() {
   $('#totale').textContent = euro(da_pagare);
   $('#ricevuto').textContent = euro(dati);
   disegnaBuono();
+  disegnaCredito();
 
   var riquadro = $('#resto');
   var cifra = $('#resto-cifra');
@@ -883,6 +949,36 @@ function disegnaBuono() {
       (resta > 0 ? ', ne restano ' + euro(resta) : '') + '. Tocca per cambiarlo.');
 }
 
+/* La faccia del pulsante del credito: la parola sopra, quanto finirebbe sul
+   quaderno sotto. Il pulsante dice sempre cosa fa davvero, perche' tocca i soldi
+   della scuola - e' la stessa regola di «Togli questa giornata».
+
+   Quando non c'e' niente da segnare si SPEGNE, non sparisce, e al posto della
+   cifra tiene un trattino: un pulsante che compare o cambia altezza sposta i due
+   accanto sotto il dito di chi sta battendo, ed e' la cosa che questa app non fa
+   mai. */
+function disegnaCredito() {
+  var b = $('#credito');
+  if (!b) { return; }
+
+  var quanto = creditoPossibile();
+  b.textContent = '';
+  b.disabled = quanto === 0;
+
+  var sopra = document.createElement('span');
+  sopra.textContent = 'Credito';
+  b.appendChild(sopra);
+
+  var sotto = document.createElement('span');
+  sotto.className = 'btn-credito-cifra';
+  sotto.textContent = quanto > 0 ? euro(quanto) : '—';
+  b.appendChild(sotto);
+
+  b.setAttribute('aria-label', quanto > 0
+    ? 'Segna ' + euro(quanto) + ' a credito'
+    : 'Credito: non c’è niente da segnare');
+}
+
 function disegnaGiornata() {
   allineaGiornata();
 
@@ -892,18 +988,21 @@ function disegnaGiornata() {
 
   /* Quanto ha fatto QUESTO dispositivo oggi: la cassa aperta adesso piu' quello che
      ha gia' archiviato oggi, se la cassa era gia' stata chiusa una volta. */
-  var mio = { vendite: g.vendite, incasso: g.incasso, buoni: g.buoni || 0, voci: {} };
+  var mio = { vendite: g.vendite, incasso: g.incasso, buoni: g.buoni || 0,
+              crediti: g.crediti || 0, voci: {} };
   sommaVoci(mio.voci, g.voci);
   stato.mio.forEach(function (x) {
     if (x.data !== g.data) { return; }
     mio.vendite += x.vendite;
     mio.incasso += x.incasso;
     mio.buoni += quotaBuoni(x);
+    mio.crediti += quotaCrediti(x);
     sommaVoci(mio.voci, x.voci);
   });
 
   // Quanto ha fatto il BAR oggi: il mio piu' quello degli altri dispositivi.
-  var tutti = { vendite: mio.vendite, incasso: mio.incasso, buoni: mio.buoni, voci: {} };
+  var tutti = { vendite: mio.vendite, incasso: mio.incasso, buoni: mio.buoni,
+                crediti: mio.crediti, voci: {} };
   sommaVoci(tutti.voci, mio.voci);
 
   var altri = giornateAltrui(g.data);
@@ -911,6 +1010,7 @@ function disegnaGiornata() {
     tutti.vendite += x.vendite;
     tutti.incasso += x.incasso;
     tutti.buoni += quotaBuoni(x);
+    tutti.crediti += quotaCrediti(x);
     sommaVoci(tutti.voci, x.voci);
   });
 
@@ -928,14 +1028,23 @@ function disegnaGiornata() {
      se batte cassa un dispositivo solo, ripetere due volte lo stesso numero
      confonde e basta. */
   var note_oggi = [];
-  if (tutti.buoni > 0) {
-    note_oggi.push('di cui ' + euro(tutti.incasso - tutti.buoni) + ' in contanti e ' +
-                   euro(tutti.buoni) + ' in buoni');
-  }
+  var come_oggi = comeSiEPagato(tutti.incasso, tutti.buoni, tutti.crediti);
+  if (come_oggi) { note_oggi.push(come_oggi); }
   if (altri.length > 0) {
     note_oggi.push('su questo dispositivo ' + euro(mio.incasso));
   }
-  $('#incasso-mio').textContent = note_oggi.join(' · ');
+
+  /* Due note su due righe e non in fila: con contanti, buoni E credito la riga in
+     fila diventa un paragrafo, e su un telefono stretto due righe corte si leggono
+     meglio di tre righe che vanno a capo dove capita. */
+  var nota_oggi = $('#incasso-mio');
+  nota_oggi.textContent = '';
+  note_oggi.forEach(function (t) {
+    var riga = document.createElement('span');
+    riga.className = 'nota-riga';
+    riga.textContent = t;
+    nota_oggi.appendChild(riga);
+  });
 
   var chiavi = Object.keys(tutti.voci);
   var pezzi_totali = riempiTabella($('#tabella-pezzi').querySelector('tbody'), tutti.voci);
@@ -998,10 +1107,11 @@ function totaliAnno(giorni) {
   return giorni.reduce(function (t, g) {
     t.incasso += g.incasso;
     t.buoni += quotaBuoni(g);
+    t.crediti += quotaCrediti(g);
     t.vendite += g.vendite;
     t.pezzi += pezziDelGiorno(g);
     return t;
-  }, { incasso: 0, buoni: 0, vendite: 0, pezzi: 0 });
+  }, { incasso: 0, buoni: 0, crediti: 0, vendite: 0, pezzi: 0 });
 }
 
 function rigaGiorno(g) {
@@ -1083,12 +1193,9 @@ function corpoGiorno(g) {
 
   var riga = document.createElement('p');
   riga.className = 'spiega';
+  var come = comeSiEPagato(g.incasso, quotaBuoni(g), quotaCrediti(g));
   riga.textContent = g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
-    ' · incasso ' + euro(g.incasso) +
-    (quotaBuoni(g) > 0
-      ? ' · di cui ' + euro(g.incasso - quotaBuoni(g)) + ' in contanti e ' +
-        euro(quotaBuoni(g)) + ' in buoni'
-      : '');
+    ' · incasso ' + euro(g.incasso) + (come ? ' · ' + come : '');
   box.appendChild(riga);
 
   /* Sta PRIMA di «Togli questa giornata» apposta: la cosa innocua per prima, quella
@@ -1188,10 +1295,18 @@ function disegnaStorico() {
 
   $('#titolo-anno').textContent = 'Anno scolastico ' + annoCorrente();
   $('#incasso-anno').textContent = euro(t.incasso);
-  // Compare solo se in tutto l'anno qualcuno ha pagato con un buono.
-  $('#incasso-anno-buoni').textContent = t.buoni > 0
-    ? 'di cui ' + euro(t.incasso - t.buoni) + ' in contanti e ' + euro(t.buoni) + ' in buoni'
-    : '';
+  // Compare solo se in tutto l'anno qualcuno ha pagato con un buono o a credito.
+  $('#incasso-anno-nota').textContent = comeSiEPagato(t.incasso, t.buoni, t.crediti);
+
+  /* Il numero per cui il credito esiste: quanto e' uscito dal banco senza denaro
+     da settembre a oggi. Dice «segnato a credito» e non «ancora da riscuotere»,
+     che sarebbe una bugia - l'app non sa registrare i rimborsi, quindi non puo'
+     sapere quanto di quello e' gia' rientrato. Chi ha pagato si vede sul quaderno.
+
+     Qui il cartellino puo' comparire e sparire senza fare danno: lo Storico e' una
+     pagina che scorre, non la cassa che si batte con la fila davanti. */
+  $('#cartellino-credito').hidden = t.crediti === 0;
+  $('#credito-anno').textContent = euro(t.crediti);
   $('#giorni-anno').textContent = String(giorni.length);
   $('#vendite-anno').textContent = String(t.vendite);
 
@@ -1259,22 +1374,29 @@ function riepilogoAnno() {
 
   r.push('Bar scolastico - riepilogo anno ' + anno);
   r.push('');
-  /* «Incasso» resta quanto si e' VENDUTO e resta dov'era: le due colonne nuove si
+  /* «Incasso» resta quanto si e' VENDUTO e resta dov'era: le colonne nuove si
      aggiungono in fondo, cosi' un file vecchio e uno nuovo restano confrontabili.
      «Contanti» e' quello che deve esserci nella scatola; «Buoni» e' la parte che
-     nella scatola non e' mai entrata perche' nessuno l'ha pagata. Senza questa
-     divisione il foglio dichiarerebbe alla scuola soldi che la scuola non ha visto. */
-  r.push('Giorno;Data;Vendite;Pezzi;Incasso;Contanti;Buoni');
+     nella scatola non e' mai entrata perche' nessuno l'ha pagata, «Crediti» quella
+     che non e' entrata ancora. Senza questa divisione il foglio dichiarerebbe alla
+     scuola soldi che la scuola non ha visto.
+
+     «Contanti» cambia valore ma non significato: ha sempre voluto dire «quello che
+     e' finito nella scatola», e una vendita a credito nella scatola non finisce.
+     Nei file di prima i crediti sono zero, quindi le somme vecchie restano quelle. */
+  r.push('Giorno;Data;Vendite;Pezzi;Incasso;Contanti;Buoni;Crediti');
 
   giorni.forEach(function (g) {
     var b = quotaBuoni(g);
+    var c = quotaCrediti(g);
     r.push(campo(dataLunga(g.data, true)) + ';' + g.data + ';' + g.vendite + ';' +
            pezziDelGiorno(g) + ';' + virgola(g.incasso) + ';' +
-           virgola(g.incasso - b) + ';' + virgola(b));
+           virgola(g.incasso - b - c) + ';' + virgola(b) + ';' + virgola(c));
   });
 
   r.push('TOTALE;;' + t.vendite + ';' + t.pezzi + ';' + virgola(t.incasso) + ';' +
-         virgola(t.incasso - t.buoni) + ';' + virgola(t.buoni));
+         virgola(t.incasso - t.buoni - t.crediti) + ';' + virgola(t.buoni) + ';' +
+         virgola(t.crediti));
   r.push('');
   r.push('Dettaglio per prodotto');
   r.push('Data;Prodotto;Pezzi;Incasso');
@@ -1331,11 +1453,11 @@ function scaricaGiornataWord(data) {
 
   /* Su un foglio che gira fuori dall'app questa riga conta piu' che altrove: dice
      che il numero grande e' quanto si e' venduto, e che una parte non e' denaro
-     entrato in cassa. Compare solo se quel giorno qualcuno ha pagato con un buono. */
-  var in_buoni = quotaBuoni(g);
-  if (in_buoni > 0) {
-    blocchi.push({ tipo: 'riga', testo: 'Di cui ' + euro(g.incasso - in_buoni) +
-      ' in contanti e ' + euro(in_buoni) + ' in buoni.' });
+     entrato in cassa. Compare solo se quel giorno qualcuno ha pagato con un buono
+     o e' andato via a credito. */
+  var come_pagato = comeSiEPagato(g.incasso, quotaBuoni(g), quotaCrediti(g));
+  if (come_pagato) {
+    blocchi.push({ tipo: 'riga', testo: 'D' + come_pagato.slice(1) + '.' });
   }
 
   blocchi.push({ tipo: 'riga', testo: g.vendite + (g.vendite === 1 ? ' vendita' : ' vendite') +
@@ -1468,14 +1590,17 @@ function disegnaTutto() {
 // L'ultimo prodotto toccato, in piu' o in meno: serve a tenerlo in vista nella lista.
 var ultimo_toccato = null;
 
-/* Quanto e' avanzato sul buono dell'ultima vendita incassata. Vive il tempo che
-   passa fra «Incassa» e il primo tocco della vendita dopo, e serve solo a
-   ricordare di scriverlo sul buono prima di restituirlo. */
-var promemoria_buono = 0;
+/* Il gesto di penna che resta da fare dopo l'ultima vendita chiusa: scrivere
+   l'avanzo sul buono di carta, oppure segnare il credito sul quaderno. Vive il
+   tempo che passa fra il pulsante e il primo tocco della vendita dopo.
+
+   E' uno solo perche' i due casi non capitano mai insieme: se un buono avanza, la
+   spesa e' coperta e non c'e' niente da mettere a credito. */
+var promemoria = '';
 
 function aggiungiPezzo(id) {
   if (!prodottoCon(id)) { return; }
-  promemoria_buono = 0;
+  promemoria = '';
   ultimo_toccato = id;
   var trovata = false;
   stato.vendita.righe.forEach(function (r) {
@@ -1519,16 +1644,46 @@ function togliPezzo(id) {
 
 function svuotaVendita() {
   ultimo_toccato = null;
-  promemoria_buono = 0;
+  promemoria = '';
   stato.vendita = { righe: [], contanti: 0, buono: 0 };
   salva();
   disegnaTutto();
 }
 
+/* Il blocco dei sei decimi di secondo vale per TUTTI E DUE i pulsanti che
+   chiudono una vendita: due tocchi involontari non devono registrare due vendite,
+   e non importa se cadono sullo stesso pulsante o uno per ciascuno. */
 var incasso_in_corso = false;
 
+/* Quello che «Incassa» e «Credito» scrivono nella giornata, e lo scrivono qui
+   tutti e due. Duplicare questo blocco sarebbe il modo classico di farlo
+   divergere: un giorno si corregge di qua e non di la', e i conti dell'anno non
+   tornano piu'.
+
+   'incasso' resta quanto si e' VENDUTO. 'col_buono' e 'a_credito' sono due PARTI
+   di quello - la parte che nessuno ha pagato e quella che non e' ancora stata
+   pagata - e i contanti, cioe' quello che davvero e' finito nella scatola, sono
+   la differenza. E' l'unico modo perche' a fine giornata il denaro contato torni
+   con quello che l'app dichiara. */
+function registraVendita(da_pagare, col_buono, a_credito) {
+  allineaGiornata();
+
+  righeVive().forEach(function (r) {
+    var p = prodottoCon(r.id);
+    var voce = stato.giornata.voci[p.id] || { nome: p.nome, qta: 0, somma: 0 };
+    voce.nome = p.nome;
+    voce.qta += r.qta;
+    voce.somma += p.prezzo * r.qta;
+    stato.giornata.voci[p.id] = voce;
+  });
+
+  stato.giornata.vendite += 1;
+  stato.giornata.incasso += da_pagare;
+  stato.giornata.buoni += col_buono;
+  stato.giornata.crediti += a_credito;
+}
+
 function incassa() {
-  // Due tocchi involontari sullo stesso pulsante non devono registrare due vendite.
   if (incasso_in_corso) { return; }
   var da_pagare = totale();
   if (da_pagare === 0) { return; }
@@ -1548,31 +1703,51 @@ function incassa() {
   incasso_in_corso = true;
   window.setTimeout(function () { incasso_in_corso = false; }, 600);
 
-  allineaGiornata();
-
-  righeVive().forEach(function (r) {
-    var p = prodottoCon(r.id);
-    var voce = stato.giornata.voci[p.id] || { nome: p.nome, qta: 0, somma: 0 };
-    voce.nome = p.nome;
-    voce.qta += r.qta;
-    voce.somma += p.prezzo * r.qta;
-    stato.giornata.voci[p.id] = voce;
-  });
-
-  stato.giornata.vendite += 1;
-  stato.giornata.incasso += da_pagare;
-
-  /* 'incasso' resta quanto si e' VENDUTO, buoni compresi. Quanto e' finito nella
-     scatola sono i contanti, cioe' la differenza: e' l'unico modo perche' a fine
-     giornata il denaro contato torni con quello che l'app dichiara. */
-  stato.giornata.buoni += col_buono;
-
+  registraVendita(da_pagare, col_buono, 0);
   svuotaVendita();
 
   if (resta_sul_buono > 0) {
-    promemoria_buono = resta_sul_buono;
+    promemoria = 'Scrivi ' + euro(resta_sul_buono) + ' sul buono.';
     disegnaConto();
   }
+}
+
+/* «Credito»: la merce esce dal banco e il denaro no, o non tutto. La scuola resta
+   creditrice, e il nome di chi deve si scrive sul quaderno di carta - nell'app
+   non entra, § «Il credito» nella scheda della logica.
+
+   Chiede conferma perche' e' l'unico pulsante della cassa che fa uscire roba dal
+   banco senza contropartita, e la frase dice i numeri veri: quanto entra nella
+   scatola e quanto no. Una conferma che non dice le cifre si impara a premere
+   senza leggerla. */
+function segnaCredito() {
+  if (incasso_in_corso) { return; }
+  var da_pagare = totale();
+  if (da_pagare === 0) { return; }
+
+  /* La serratura, come in 'incassa': se non manca niente non c'e' niente da
+     segnare, e il credito non deve poter nascere da un'altra strada. */
+  var a_credito = creditoPossibile();
+  if (a_credito === 0) { return; }
+
+  var col_buono = buonoUsato();
+  var in_contanti = stato.vendita.contanti;
+
+  var domanda = in_contanti > 0
+    ? 'Prendo ' + euro(in_contanti) + ' in contanti e segno ' + euro(a_credito) +
+      ' a credito?\n\nNella scatola entra solo ' + euro(in_contanti) + '.'
+    : 'Segno ' + euro(a_credito) + ' a credito?\n\nNella scatola non entra niente.';
+
+  if (!window.confirm(domanda + ' Scrivi nome e importo sul quaderno dei crediti.')) { return; }
+
+  incasso_in_corso = true;
+  window.setTimeout(function () { incasso_in_corso = false; }, 600);
+
+  registraVendita(da_pagare, col_buono, a_credito);
+  svuotaVendita();
+
+  promemoria = 'Segna ' + euro(a_credito) + ' sul quaderno dei crediti.';
+  disegnaConto();
 }
 
 // --------------------------------------------------------------- schede
@@ -1700,7 +1875,7 @@ function chiudiTastierino() {
 
 function scegliBuono(centesimi) {
   stato.vendita.buono = centesimi;
-  promemoria_buono = 0;
+  promemoria = '';
   chiudiTastierino();
   salva();
   disegnaConto();
@@ -1788,6 +1963,7 @@ function collegaEventi() {
   });
 
   $('#incassa').addEventListener('click', incassa);
+  $('#credito').addEventListener('click', segnaCredito);
 
   /* Chiudere la cassa vuol dire mettere via l'incasso di una giornata: chiede la
      password, cosi' non succede per un tocco sbagliato mentre c'e' la fila. La
@@ -1796,9 +1972,16 @@ function collegaEventi() {
   $('#chiudi-cassa').addEventListener('click', function () {
     if (stato.giornata.vendite === 0) { return; }
 
+    /* Quanto di oggi nella scatola non c'e' va detto QUI: e' il momento in cui il
+       denaro si conta, e la differenza fra quello che l'app dichiara e quello che
+       si trova ha un nome solo se la si legge prima di contare, non dopo. */
+    var come_oggi = comeSiEPagato(stato.giornata.incasso, stato.giornata.buoni,
+                                  stato.giornata.crediti);
+
     chiediPassword({
       titolo: 'Chiudi la cassa',
       invito: 'Incasso di oggi su questo dispositivo: ' + euro(stato.giornata.incasso) +
+        (come_oggi ? ', ' + come_oggi : '') +
         '. La giornata finisce nello Storico e i totali tornano a zero per domani.',
       pulsante: 'Chiudi la cassa',
       annullabile: true

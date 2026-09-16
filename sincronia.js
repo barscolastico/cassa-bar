@@ -239,9 +239,12 @@ window.Sincronia = {
       data: g.data,
       vendite: g.vendite,
       incasso: g.incasso,
-      // La parte pagata coi buoni. Un server vecchio la ignora e la mette a zero:
-      // e' il motivo per cui il server si aggiorna PRIMA dell'app, non dopo.
+      /* Le due parti dell'incasso che nella scatola non sono entrate: il buono che
+         nessuno ha pagato, e la merce andata via a credito. Un server vecchio le
+         ignora e le mette a zero - e' il motivo per cui il server si aggiorna
+         PRIMA dell'app, non dopo. */
       buoni: g.buoni || 0,
+      crediti: g.crediti || 0,
       voci: g.voci,
       automatica: !!g.automatica
     });

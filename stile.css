@@ -20,6 +20,22 @@
   --blu-chiaro: #dbeafe;
   --blu-testo: #1e3a8a;     /* testo sopra --blu-chiaro */
 
+  /* Il quinto, e per la stessa ragione del quarto: il credito non e' il buono.
+     Un buono e' gia' stato guadagnato e non tornera' mai denaro; un credito e'
+     denaro che deve ancora arrivare. Due cose diverse non possono avere lo
+     stesso colore in una schermata che si legge in due secondi. */
+  --viola: #7e22ce;
+  --viola-chiaro: #f3e8ff;
+  --viola-testo: #6b21a8;   /* testo sopra --viola-chiaro */
+
+  /* L'inchiostro per quello che sta SOPRA un colore pieno - il verde della
+     testata e di «Incassa», il viola del credito premuto. Non e' sempre il
+     bianco, ed e' il motivo per cui esiste: nel tema scuro il verde non e' piu'
+     un verde scuro ma un verde CHIARO, e il bianco sopra scende a 2,5 di
+     contrasto - «Incassa», le schede, il bollino dei pezzi e «Aggiungi», tutti
+     insieme. Li' sopra ci vuole inchiostro scuro. */
+  --su-pieno: #ffffff;
+
   --fondo: #f1f5f9;
   --carta: #ffffff;
   --bordo: #cbd5e1;
@@ -43,6 +59,10 @@
     --blu: #60a5fa;
     --blu-chiaro: #172554;
     --blu-testo: #93c5fd;
+    --viola: #c084fc;
+    --viola-chiaro: #2e1065;
+    --viola-testo: #e9d5ff;
+    --su-pieno: #0b1220;      /* 7,5 sul verde chiaro, 7,1 sul viola chiaro */
 
     --fondo: #0b1220;
     --carta: #16202e;
@@ -80,7 +100,7 @@ button { touch-action: manipulation; }
 .testata {
   flex: none;
   background: var(--verde);
-  color: #fff;
+  color: var(--su-pieno);
   padding: max(8px, env(safe-area-inset-top)) 12px 0;
   display: flex;
   flex-direction: column;
@@ -107,7 +127,7 @@ button { touch-action: manipulation; }
   border: 0;
   border-radius: var(--raggio) var(--raggio) 0 0;
   background: rgba(255, 255, 255, .16);
-  color: #fff;
+  color: var(--su-pieno);
   font-weight: 600;
   font-size: clamp(.78rem, 3.3vw, 1rem);   /* quattro schede devono stare su 375 px */
   cursor: pointer;
@@ -214,7 +234,7 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 0 7px;
   border-radius: 13px;
   background: var(--verde);
-  color: #fff;
+  color: var(--su-pieno);
   font-weight: 700;
   font-size: .9rem;
   display: flex; align-items: center; justify-content: center;
@@ -414,7 +434,17 @@ main { flex: 1; min-height: 0; display: flex; }
 .resto.col-buono { background: var(--blu-chiaro); border-color: var(--blu); }
 .resto.col-buono .resto-cifra, .resto.col-buono .resto-etichetta { color: var(--blu-testo); }
 
-.azioni { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+/* Tre colonne: Annulla, Credito, Incassa - i tre modi in cui una vendita
+   finisce, in fila e non su due righe. L'altezza qui e' la valuta cara: ogni riga
+   in piu' nel conto la paga la griglia dei prodotti, che vive dell'avanzo, ed e'
+   il conto gia' pagato con 'cassa-bar-5' e col taglio da 50 €.
+
+   Il prezzo lo paga la larghezza. Su uno schermo da 320 px restano 296 px dentro
+   il conto: tolti i due divari fanno 70 px per «Annulla», 70 per «Credito» e 140
+   per «Incassa». «Annulla» a 1.05rem grassetto ci sta per pochi pixel - e' il
+   motivo per cui si chiama cosi' e non «Lascia stare», § 'cassa-bar-10' - e
+   «Credito» ci sta perche' ha un carattere suo, piu' corto, e la cifra va sotto. */
+.azioni { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px; }
 
 .btn {
   min-height: 60px;
@@ -430,8 +460,37 @@ main { flex: 1; min-height: 0; display: flex; }
 .btn-annulla { background: var(--carta); border-color: var(--bordo); color: var(--testo-tenue); }
 .btn-annulla:not(:disabled):active { background: var(--rosso-chiaro); border-color: var(--rosso); color: var(--rosso); }
 
-.btn-incassa { background: var(--verde); color: #fff; }
+.btn-incassa { background: var(--verde); color: var(--su-pieno); }
 .btn-incassa:not(:disabled):active { background: var(--verde-scuro); }
+
+/* Il credito CHIUDE una vendita, quindi non e' in filo come «Annulla»: ha un
+   fondo suo. Ma il pieno resta uno solo in tutta la cassa, ed e' «Incassa» - il
+   pulsante che si preme cento volte su cento e che il dito deve trovare senza
+   guardare.
+
+   Due righe dentro il pulsante, come fa gia' «Buono» fra i tagli: la parola
+   sopra, quanto finirebbe sul quaderno sotto. Cosi' il numero sta attaccato alla
+   cosa a cui appartiene, e il pulsante non cambia altezza quando la cifra compare
+   o sparisce - da spento tiene un trattino al suo posto. */
+.btn-credito {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+  font-size: .95rem;
+  background: var(--viola-chiaro);
+  border-color: var(--viola);
+  color: var(--viola-testo);
+}
+
+.btn-credito:not(:disabled):active { background: var(--viola); color: var(--su-pieno); }
+.btn-credito-cifra { font-size: .72rem; font-weight: 700; opacity: .9; font-variant-numeric: tabular-nums; }
+
+/* Da spento il fondo colorato direbbe «si puo' fare»: torna carta come gli altri
+   pulsanti spenti, e resta solo il bordo a dire che il pulsante c'e'. */
+.btn-credito:disabled { background: var(--carta); }
 
 /* --------------------------------------------------------- giornata */
 
@@ -626,7 +685,7 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 
 .campi input:focus { outline: 3px solid var(--verde); outline-offset: 1px; border-color: var(--verde); }
 
-.btn-aggiungi { width: 100%; margin-top: 10px; background: var(--verde); color: #fff; }
+.btn-aggiungi { width: 100%; margin-top: 10px; background: var(--verde); color: var(--su-pieno); }
 .errore { color: var(--rosso); font-weight: 600; margin: 8px 0 0; }
 
 /* --------------------------------------------------------- striscia avvisi */
@@ -655,7 +714,7 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   border: 0;
   border-radius: 10px;
   background: var(--verde);
-  color: #fff;
+  color: var(--su-pieno);
   font-weight: 700;
   cursor: pointer;
 }
@@ -815,6 +874,27 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   font-size: .8rem;
   font-weight: 600;
 }
+
+/* Quando le note sono due - come si e' pagato, e quanto ha fatto questo
+   dispositivo - vanno una per riga. In fila, con contanti, buoni e credito tutti
+   e tre, diventerebbero un paragrafo che su un telefono stretto va a capo dove
+   capita. */
+.cartellino-nota .nota-riga { display: block; }
+.cartellino-nota .nota-riga + .nota-riga { margin-top: 2px; }
+
+/* Il cartellino del credito dell'anno: largo quanto quello dell'incasso, perche'
+   e' il numero che il credito esiste per far vedere. Compare solo se in tutto
+   l'anno qualcuno e' andato via senza pagare. */
+.cartellino.credito {
+  grid-column: 1 / -1;
+  background: var(--viola-chiaro);
+  border-color: var(--viola);
+}
+
+.cartellino.credito .cartellino-etichetta,
+.cartellino.credito .cartellino-nota { color: var(--viola-testo); }
+.cartellino.credito .cartellino-cifra { font-size: clamp(1.8rem, 7vw, 2.4rem); color: var(--viola-testo); }
+.cartellino.credito .cartellino-nota { font-weight: 400; line-height: 1.4; }
 
 /* Il codice va letto a occhio e ricopiato: carattere a larghezza fissa e
    spezzabile, altrimenti su telefono esce dallo schermo. */

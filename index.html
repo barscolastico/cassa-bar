@@ -97,8 +97,14 @@
         <span class="resto-cifra" id="resto-cifra">—</span>
       </div>
 
+      <!-- I tre modi in cui una vendita finisce: buttarla via, segnarla sul
+           quaderno, prendere i soldi. Stanno in fila e non su due righe perche'
+           una riga in piu' qui sono ~56 px tolti alla griglia dei prodotti, che
+           vive dell'avanzo: su un telefono basso e' la differenza fra due file di
+           prodotti e una. «Credito» si spegne, non sparisce. -->
       <div class="azioni">
         <button class="btn btn-annulla" id="annulla" type="button">Annulla</button>
+        <button class="btn btn-credito" id="credito" type="button" disabled>Credito</button>
         <button class="btn btn-incassa" id="incassa" type="button" disabled>Incassa</button>
       </div>
     </aside>
@@ -146,7 +152,16 @@
       <div class="cartellino grande">
         <span class="cartellino-etichetta">Incassato nell'anno</span>
         <strong class="cartellino-cifra" id="incasso-anno">0,00&nbsp;€</strong>
-        <span class="cartellino-nota" id="incasso-anno-buoni"></span>
+        <span class="cartellino-nota" id="incasso-anno-nota"></span>
+      </div>
+      <!-- Il numero per cui il credito esiste. Dice «segnato», non «da
+           riscuotere»: l'app non sa ancora registrare i rimborsi, e quanto sia
+           gia' rientrato lo sa solo il quaderno. -->
+      <div class="cartellino credito" id="cartellino-credito" hidden>
+        <span class="cartellino-etichetta">Segnato a credito quest'anno</span>
+        <strong class="cartellino-cifra" id="credito-anno">0,00&nbsp;€</strong>
+        <span class="cartellino-nota">Chi deve sta sul quaderno dei crediti: qui ci
+          sono le cifre, non i nomi.</span>
       </div>
       <div class="cartellino">
         <span class="cartellino-etichetta">Giorni di apertura</span>
