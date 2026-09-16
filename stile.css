@@ -627,8 +627,22 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 
 .elenco-prodotti { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 
+/* La riga sta su DUE righe: sopra il nome e il prezzo, sotto i quattro pulsanti.
+   Su una riga sola non ci stanno: quattro pulsanti da 44 px piu' il prezzo mangiano
+   261 px dei 321 di un telefono da 375, e al nome ne restano 60. Fin qui sarebbe
+   solo stretto; il guaio e' che un nome con una parola lunga - «Margherita»,
+   «Hamburger» - non sta in 60 px e non si spezza, quindi allarga la sua casella e
+   spinge i pulsanti fuori a destra. Ogni riga li spingeva di quanto era lunga la sua
+   parola piu' lunga: le ✕ finivano a quote diverse, e su un telefono piu' stretto
+   uscivano proprio dallo schermo. Su 320 px al nome restavano 5 px.
+
+   Cosi' invece i pulsanti non dipendono piu' dal nome: partono da capo, sempre alla
+   stessa distanza dal bordo destro, su qualunque telefono. E il nome, che ha tutta
+   la larghezza, spesso ci sta in una riga sola: «Pizza Tonno e Cipolla» occupava
+   quattro righe, adesso una. */
 .elenco-prodotti li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   background: var(--carta);
@@ -638,8 +652,29 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   box-shadow: var(--ombra);
 }
 
-.voce-nome { flex: 1; font-weight: 600; }
-.voce-prezzo { font-variant-numeric: tabular-nums; color: var(--testo-tenue); }
+.voce-nome {
+  /* La base e' 0, non «auto»: cosi' il nome non porta mai con se' la sua lunghezza
+     intera quando il browser decide chi sta su quale riga, e il prezzo gli resta
+     accanto invece di scivolare a capo. Con «auto» un telefono da 280 px e i
+     caratteri grandi mandava il prezzo su una riga sua, incollato a sinistra. */
+  flex: 1 1 0;
+  min-width: 0;          /* senza questo la casella non scende sotto la sua parola
+                            piu' lunga, ed e' esattamente il difetto di sopra */
+  overflow-wrap: anywhere;   /* rete per un nome di 24 caratteri tutto attaccato:
+                                si spezza, non sfonda la riga */
+  font-weight: 600;
+}
+
+.voce-prezzo { flex: none; font-variant-numeric: tabular-nums; color: var(--testo-tenue); }
+
+/* «flex: 1 0 100%» e' quello che manda i pulsanti a capo: chiedono una riga intera
+   per se'. Incollati a destra, dove stavano prima. */
+.voce-azioni {
+  flex: 1 0 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 .mini {
   min-width: 44px; min-height: 44px;

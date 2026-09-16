@@ -1573,9 +1573,17 @@ function disegnaProdotti() {
     elimina.textContent = '✕';
     elimina.setAttribute('aria-label', 'Elimina ' + p.nome);
 
+    /* I quattro pulsanti stanno insieme dentro una scatola loro, e la scatola va a
+       capo: e' quello che li tiene incolonnati riga dopo riga. Appesi al nome come
+       prima, ognuno partiva da dove finiva il nome della SUA riga, e le ✕ uscivano
+       tutte a quote diverse. Il come sta in stile.css, sotto «prodotti». */
+    var azioni = document.createElement('div');
+    azioni.className = 'voce-azioni';
+    azioni.appendChild(su); azioni.appendChild(giu);
+    azioni.appendChild(modifica); azioni.appendChild(elimina);
+
     li.appendChild(nome); li.appendChild(prezzo);
-    li.appendChild(su); li.appendChild(giu);
-    li.appendChild(modifica); li.appendChild(elimina);
+    li.appendChild(azioni);
     elenco.appendChild(li);
   });
 }
@@ -2148,8 +2156,15 @@ function apriModifica(id) {
 
   annullaBtn.addEventListener('click', disegnaProdotti);
 
+  /* Stessa scatola della riga normale, per due motivi: la riga non deve saltare da
+     una disposizione all'altra quando si tocca ✎, e su un telefono stretto la
+     casella del nome non deve ridursi a un francobollo per far posto ai pulsanti. */
+  var azioni = document.createElement('div');
+  azioni.className = 'voce-azioni';
+  azioni.appendChild(salvaBtn); azioni.appendChild(annullaBtn);
+
   li.appendChild(nome); li.appendChild(prezzo);
-  li.appendChild(salvaBtn); li.appendChild(annullaBtn);
+  li.appendChild(azioni);
   nome.focus();
   nome.select();
 }
