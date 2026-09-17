@@ -257,7 +257,11 @@ function carica() {
         crediti: quotaCrediti(g),
         voci: vociBuone(g.voci),
         automatica: !!g.automatica,
-        inviata: g.inviata === true
+        inviata: g.inviata === true,
+        /* Fuori dai conti: il server l'ha presa ma quel giorno era stato tolto. La
+           riga resta qui per intero - e' il totale che si continua a mandare - ma
+           non entra in nessun totale. Un salvataggio vecchio non ce l'ha: vale no. */
+        fuori: g.fuori === true
       };
     });
   }
@@ -311,7 +315,13 @@ function sommaVoci(dentro, da) {
 
    In tutti e due i casi la riga torna «da mandare»: al server si spedisce sempre
    il TOTALE del giorno, mai quanto e' cambiato, e quindi il totale nuovo deve
-   ripartire anche se il vecchio era gia' arrivato. */
+   ripartire anche se il vecchio era gia' arrivato.
+
+   Una riga fuori dai conti si somma come tutte le altre e resta fuori: e' il modo
+   in cui quello che si batte in un giorno tolto continua ad andare al server senza
+   entrare in nessun totale. Se non si sommasse - se la riga fosse stata buttata via
+   e ne nascesse una nuova - il TOTALE non sarebbe piu' un totale, e l'invio dopo
+   cancellerebbe quello di prima. Era il difetto del 17 settembre 2026. */
 function archivia(giornata, automatica) {
   if (!giornata || (giornata.vendite === 0 && giornata.incasso === 0)) { return; }
 
@@ -337,7 +347,8 @@ function archivia(giornata, automatica) {
     crediti: giornata.crediti || 0,
     voci: giornata.voci,
     automatica: !!automatica,
-    inviata: false
+    inviata: false,
+    fuori: false
   });
   stato.mio.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
 }
@@ -380,8 +391,13 @@ function giornateUnite(dal, al) {
   var per_data = {};
   var mio_codice = window.Sincronia.dispositivo();
 
+  /* Le giornate fuori dai conti non contano da nessuna parte: stanno qui perche' sono il
+     totale da mandare al server, non perche' entrino in un totale. E non coprono nemmeno
+     la riga che ne ha il server: il giorno che quel giorno viene rimesso dentro dal
+     pannello, il server ricomincia a nominarlo e dev'essere quella riga a farsi vedere -
+     anche prima che questo dispositivo gli rimandi qualcosa. */
   var mie_date = {};
-  stato.mio.forEach(function (g) { mie_date[g.data] = true; });
+  stato.mio.forEach(function (g) { if (!g.fuori) { mie_date[g.data] = true; } });
 
   function aggiungi(g, non_inviata) {
     if (dal && g.data < dal) { return; }
@@ -411,7 +427,7 @@ function giornateUnite(dal, al) {
     aggiungi(g, false);
   });
 
-  stato.mio.forEach(function (g) { aggiungi(g, !g.inviata); });
+  stato.mio.forEach(function (g) { if (!g.fuori) { aggiungi(g, !g.inviata); } });
 
   return Object.keys(per_data).sort().map(function (k) { return per_data[k]; });
 }
@@ -435,27 +451,37 @@ function giornateAltrui(data) {
 var TETTO_GIORNATE_SERVER = 2000;
 
 /* Una giornata mia che il server ha gia' ricevuto, e che adesso non nomina piu', li' e'
-   stata tolta: annullata da un altro dispositivo, o cancellata dal pannello. Va tolta
-   anche qui.
+   stata tolta: annullata da un altro dispositivo, o cancellata dal pannello. Va messa
+   fuori dai conti anche qui. E se ricomincia a nominarla - qualcuno l'ha rimessa dentro
+   dal pannello - torna a contare: la stessa regola nei due sensi, perche' una sola delle
+   due direzioni lascerebbe questo dispositivo indietro per sempre.
 
-   Senza questa regola non se ne andava piu': «Togli questa giornata dai conti» toglie la
-   riga soltanto dal dispositivo su cui si preme, e su tutti gli altri che l'avevano
-   battuta restava a gonfiare i totali dell'anno. Il guaio e' che non si vedeva - su ogni
-   altro schermo i conti erano giusti, e il telefono che sbagliava era proprio quello che
-   nessuno confrontava.
+   Senza questa regola una giornata tolta non se ne andava piu': «Togli questa giornata
+   dai conti» toglie la riga soltanto dal dispositivo su cui si preme, e su tutti gli
+   altri che l'avevano battuta restava a gonfiare i totali dell'anno. Il guaio e' che non
+   si vedeva - su ogni altro schermo i conti erano giusti, e il telefono che sbagliava era
+   proprio quello che nessuno confrontava.
+
+   Fuori dai conti, non buttata via. Sono due cose diverse e la differenza sta tutta in
+   cosa succede dopo: la riga che resta e' il totale di quel giorno su questo dispositivo,
+   quindi la chiusura di cassa successiva ci si somma dentro e al server arriva ancora un
+   totale. Buttandola via - come si faceva fino al 17 settembre 2026 - l'invio dopo
+   portava soltanto le vendite nuove, e sul server cancellava quelle di prima.
 
    Tre guardie, perche' «il server non la nomina» voglia dire davvero «non c'e' piu'» e non
    «non gliel'ho chiesta» o «non gliel'ho ancora mandata»:
      - si guarda solo da collegati, cioe' su una risposta arrivata adesso;
-     - solo le giornate gia' partite: quelle in coda restano, e' il loro posto;
+     - solo le giornate gia' partite: quelle in coda restano dentro i conti, e' il loro
+       posto;
      - solo dentro l'anno scolastico che abbiamo chiesto, e solo se la risposta non e'
        stata tagliata dal tetto.
 
    Il prezzo, scritto perche' non sia una sorpresa il giorno che capita: se il server
-   perdesse una giornata, i dispositivi la butterebbero dietro di lui. E' la stessa scelta
-   di sempre - lo storico e' del server, qui c'e' una coda - e vale perche' l'altro modo
-   sbaglia in silenzio, e questo no. */
-function dimenticaGiornateTolte() {
+   perdesse una giornata, i dispositivi la toglierebbero dai totali dietro di lui. E' la
+   stessa scelta di sempre - lo storico e' del server, qui c'e' una coda - ma adesso costa
+   meno di prima, perche' nessuno butta via niente: il giorno che la riga torna sul
+   server, i conti tornano da soli. */
+function allineaGiornateTolte() {
   if (!window.Sincronia.configurato() || !window.Sincronia.collegato()) { return false; }
 
   var righe = window.Sincronia.giornate();
@@ -468,15 +494,21 @@ function dimenticaGiornateTolte() {
   });
 
   var e = estremiAnno(annoCorrente());
-  var prima = stato.mio.length;
+  var cambiato = false;
 
-  stato.mio = stato.mio.filter(function (g) {
-    if (!g.inviata) { return true; }
-    if (g.data < e.dal || g.data > e.al) { return true; }
-    return sul_server[g.data] === true;
+  stato.mio.forEach(function (g) {
+    if (!g.inviata) { return; }
+    if (g.data < e.dal || g.data > e.al) { return; }
+
+    var fuori = sul_server[g.data] !== true;
+    if (g.fuori === fuori) { return; }
+
+    g.fuori = fuori;
+    if (fuori) { segnaUscitaDalConto(g.data); }
+    cambiato = true;
   });
 
-  if (stato.mio.length === prima) { return false; }
+  if (!cambiato) { return false; }
   salva();
   return true;
 }
@@ -489,8 +521,32 @@ var coda_da_rifare = false;
 /* I giorni che il server ha preso e messo fuori dai conti mentre l'app era aperta. Non si
    salvano da nessuna parte: servono a dirlo una volta a chi sta guardando lo schermo,
    perche' una giornata che esce dai totali senza che nessuno lo dica e' esattamente il
-   modo in cui i soldi della scuola si perdono di vista. */
+   modo in cui i soldi della scuola si perdono di vista.
+
+   Un giorno per volta, non un invio per volta: chiudere due volte la cassa dentro un
+   giorno tolto e' un fatto solo, e contarlo due volte faceva dire «2 giornate» a chi ne
+   aveva una. */
 var tolte_dal_server = [];
+
+function segnaUscitaDalConto(data) {
+  if (tolte_dal_server.indexOf(data) === -1) { tolte_dal_server.push(data); }
+}
+
+/* Quelli da segnalare adesso. Non basta ricordare cos'e' successo: bisogna ricontrollare
+   che sia ancora vero. Un giorno rimesso dentro dal pannello torna nei totali da solo, e
+   l'avviso deve sparire con lui - fino al 17 settembre 2026 restava scritto fino alla
+   chiusura dell'app, e diceva una cosa falsa sotto i numeri giusti.
+
+   In piu' c'e' sempre OGGI, se oggi e' fuori dai conti: li' si sta battendo cassa dentro
+   un giorno che non conta da nessuna parte, ed e' il momento in cui serve saperlo. */
+function giorniFuoriDaSegnalare() {
+  var fuori = {};
+  stato.mio.forEach(function (g) { if (g.fuori) { fuori[g.data] = true; } });
+
+  var elenco = tolte_dal_server.filter(function (d) { return fuori[d] === true; });
+  if (fuori[oggi()] === true && elenco.indexOf(oggi()) === -1) { elenco.push(oggi()); }
+  return elenco.sort();
+}
 
 /* Le giornate mie che non sono ancora arrivate al server. Si riprova a ogni giro di
    controllo e a ogni rientro nell'app: chiudere la cassa senza rete non deve far
@@ -509,25 +565,30 @@ function spingiCoda() {
 
   invio_in_corso = true;
 
-  var quante_tolte = tolte_dal_server.length;
+  var cambiato = false;
 
   return rimaste.reduce(function (catena, g) {
     return catena.then(function () {
       return window.Sincronia.mandaGiornata(g).then(function (esito) {
-        /* Il server risponde due cose diverse. «Presa»: la giornata e' partita e la copia
-           resta qui. Oppure «presa, ma quel giorno era stato tolto dai conti»: la riga
-           la' e' scritta e si puo' rimettere, e qui non deve restare - se restasse
-           continuerebbe a contare su questo dispositivo e su nessun altro, che e'
-           precisamente il guaio che si sta chiudendo.
+        /* Il server risponde due cose diverse. «Presa»: la giornata e' dentro i conti.
+           Oppure «presa, ma quel giorno era stato tolto dai conti».
 
-           Si manda comunque, e non si butta prima: cosi' nemmeno una giornata tolta
-           sparisce senza essere passata dal server. */
-        if (esito && esito.annullata) {
-          stato.mio = stato.mio.filter(function (x) { return x !== g; });
-          tolte_dal_server.push(g.data);
-        } else {
-          g.inviata = true;
-        }
+           In tutti e due i casi la copia RESTA qui, e quello che cambia e' soltanto se
+           conta: una giornata fuori dai conti non entra in nessun totale, ne' qui ne'
+           altrove - che e' lo scopo della regola - ma continua a essere il totale di
+           quel giorno su questo dispositivo, ed e' quello che si rimanda.
+
+           Fino al 17 settembre 2026 qui la copia si buttava via, e la conseguenza non
+           si vedeva da nessuna parte: la chiusura di cassa dopo ripartiva da zero,
+           mandava soltanto le vendite nuove, e il server - che riscrive la riga, mai la
+           somma - cancellava quelle di prima. Tre invii, 23,50 € spariti dai totali e
+           nemmeno recuperabili rimettendo dentro il giorno, perche' la riga da
+           rimettere dentro era gia' stata sovrascritta. */
+        var era_fuori = g.fuori === true;
+        g.inviata = true;
+        g.fuori = !!(esito && esito.annullata);
+        if (g.fuori !== era_fuori) { cambiato = true; }
+        if (g.fuori) { segnaUscitaDalConto(g.data); }
         salva();
       });
     });
@@ -535,7 +596,7 @@ function spingiCoda() {
     // Linea persa a meta': quelle che restano riprovano al giro dopo.
   }).then(function () {
     invio_in_corso = false;
-    if (tolte_dal_server.length !== quante_tolte) { ridisegnaQuelloCheSiVede(); }
+    if (cambiato) { ridisegnaQuelloCheSiVede(); }
     if (!coda_da_rifare) { return; }
     coda_da_rifare = false;
     return spingiCoda();
@@ -612,12 +673,14 @@ function descriviRete(nodo) {
      rimasta fuori dai conti, perche' quel giorno era stato tolto. E' piu' importante di
      sapere se siamo collegati - sono soldi battuti che non entrano in nessun totale - e
      la riga lo dice finche' l'app resta aperta. */
-  if (tolte_dal_server.length > 0) {
+  var fuori = giorniFuoriDaSegnalare();
+
+  if (fuori.length > 0) {
     nodo.classList.add('attenzione');
-    nodo.textContent = tolte_dal_server.length === 1
-      ? 'La cassa di ' + dataLunga(tolte_dal_server[0]) + ' è arrivata al server, ma quel ' +
+    nodo.textContent = fuori.length === 1
+      ? 'La cassa di ' + dataLunga(fuori[0]) + ' è arrivata al server, ma quel ' +
         'giorno era stato tolto dai conti: là resta scritta e si può rimettere, nei totali no.'
-      : tolte_dal_server.length + ' giornate sono arrivate al server, ma quei giorni erano ' +
+      : fuori.length + ' giornate sono arrivate al server, ma quei giorni erano ' +
         'stati tolti dai conti: là restano scritte e si possono rimettere, nei totali no.';
     return;
   }
@@ -1081,6 +1144,9 @@ function disegnaGiornata() {
   sommaVoci(mio.voci, g.voci);
   stato.mio.forEach(function (x) {
     if (x.data !== g.data) { return; }
+    // Fuori dai conti e' fuori da tutti i conti, anche da questo: un numero che non
+    // entra in nessun totale non deve comparire da solo in una schermata sola.
+    if (x.fuori) { return; }
     mio.vendite += x.vendite;
     mio.incasso += x.incasso;
     mio.buoni += quotaBuoni(x);
@@ -1150,7 +1216,9 @@ function disegnaGiornata() {
   var vecchio = document.getElementById('avviso-precedente');
   if (vecchio) { vecchio.remove(); }
 
-  var ultimo = stato.mio.length ? stato.mio[stato.mio.length - 1] : null;
+  // Una giornata fuori dai conti non si annuncia: non e' finita in nessun totale.
+  var dentro = stato.mio.filter(function (x) { return !x.fuori; });
+  var ultimo = dentro.length ? dentro[dentro.length - 1] : null;
   if (ultimo && ultimo.automatica && ultimo.data !== oggi() && g.vendite === 0) {
     var avviso = document.createElement('p');
     avviso.id = 'avviso-precedente';
@@ -1361,8 +1429,17 @@ function eliminaGiorno(data) {
     return;
   }
 
+  /* Fuori dai conti, non via di qui. La riga resta perche' resta il totale di quel
+     giorno su questo dispositivo: se poi si vende ancora nello stesso giorno - ed e' il
+     caso piu' probabile, visto che si tolgono le prove del giorno stesso - la chiusura
+     di cassa ci si somma dentro e al server arriva ancora un totale.
+
+     Buttandola via si ricominciava da zero, e l'invio dopo cancellava sul server quello
+     di prima: il 17 settembre 2026 sono spariti cosi' 23,50 €, e non li ha riportati
+     indietro nemmeno rimettere dentro il giorno, perche' la riga era gia' sovrascritta. */
   window.Sincronia.annulla(data).then(function () {
-    stato.mio = stato.mio.filter(function (x) { return x.data !== data; });
+    stato.mio.forEach(function (x) { if (x.data === data) { x.fuori = true; } });
+    segnaUscitaDalConto(data);
     salva();
     return window.Sincronia.aggiorna();
   }).then(disegnaStorico, function (e) {
@@ -2324,9 +2401,10 @@ function ridisegnaQuelloCheSiVede() {
 function arrivanoNotizie() {
   var listino_cambiato = adottaProdotti();
 
-  // Prima di rimandare qualcosa: le mie giornate che la' non ci sono piu' si tolgono
-  // anche di qui, se no restano per sempre a gonfiare i totali di questo dispositivo.
-  dimenticaGiornateTolte();
+  // Prima di rimandare qualcosa: le mie giornate che la' non ci sono piu' escono dai
+  // conti anche di qui, se no restano per sempre a gonfiare i totali di questo
+  // dispositivo. E quelle che la' sono tornate rientrano.
+  allineaGiornateTolte();
 
   spingiCoda();
 
