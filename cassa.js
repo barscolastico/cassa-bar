@@ -437,6 +437,30 @@ function giornateDellAnno() {
   return giornateUnite(e.dal, e.al);
 }
 
+/* Le MIE righe gia' archiviate di un giorno. Di solito sono le copie locali. Ma se di
+   quel giorno qui non e' rimasto niente, quella buona e' la riga che ne ha il server: e'
+   l'unica rimasta, e va contata.
+
+   Non e' un caso raro. Fino alla 13 l'app buttava via la copia di una giornata che il
+   server metteva fuori dai conti, e svuotando i dati del sito succede lo stesso. Il
+   risultato era che Giornata dimenticava proprio quello che aveva battuto questo
+   apparecchio - contava la cassa aperta e le righe degli ALTRI, § giornateAltrui - mentre
+   lo Storico quella riga la contava, § giornateUnite. Due schermate con due numeri
+   diversi per lo stesso giorno, e ogni apparecchio sbagliava del suo importo: il telefono
+   di 7,50 €, il tablet di 10,50 €, il PC - che la copia ce l'aveva ancora - di niente.
+
+   Una riga fuori dai conti non conta qui come non conta altrove: se e' l'unica che ho,
+   vale zero e il server non la nomina, quindi nemmeno il ripiego la trova. */
+function mieGiornateArchiviate(data) {
+  var mie = stato.mio.filter(function (g) { return g.data === data && !g.fuori; });
+  if (mie.length > 0) { return mie; }
+
+  var mio_codice = window.Sincronia.dispositivo();
+  return window.Sincronia.giornate().filter(function (g) {
+    return g.data === data && g.dispositivo === mio_codice;
+  });
+}
+
 // Le righe che gli ALTRI dispositivi hanno mandato per un certo giorno.
 function giornateAltrui(data) {
   var mio_codice = window.Sincronia.dispositivo();
@@ -1142,11 +1166,11 @@ function disegnaGiornata() {
   var mio = { vendite: g.vendite, incasso: g.incasso, buoni: g.buoni || 0,
               crediti: g.crediti || 0, voci: {} };
   sommaVoci(mio.voci, g.voci);
-  stato.mio.forEach(function (x) {
-    if (x.data !== g.data) { return; }
-    // Fuori dai conti e' fuori da tutti i conti, anche da questo: un numero che non
-    // entra in nessun totale non deve comparire da solo in una schermata sola.
-    if (x.fuori) { return; }
+  /* Le mie righe di oggi gia' chiuse: quelle locali, o quella del server se qui non e'
+     rimasto niente. La regola sta in mieGiornateArchiviate ed e' la stessa che usa lo
+     Storico: due schermate che contano lo stesso giorno devono contarlo allo stesso modo,
+     altrimenti danno due numeri diversi e non si sa quale credere. */
+  mieGiornateArchiviate(g.data).forEach(function (x) {
     mio.vendite += x.vendite;
     mio.incasso += x.incasso;
     mio.buoni += quotaBuoni(x);
