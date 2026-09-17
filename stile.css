@@ -36,6 +36,24 @@
      insieme. Li' sopra ci vuole inchiostro scuro. */
   --su-pieno: #ffffff;
 
+  /* Il velo che stacca una scheda SPENTA dal verde della testata. Esiste per la
+     stessa ragione di --su-pieno qui sopra: nei due temi deve andare in due
+     direzioni opposte.
+
+     Era bianco al 16% in tutti e due, e nel tema chiaro lavorava contro. Un velo
+     bianco sul verde avvicina il fondo al bianco del testo che ci sta sopra:
+     Giornata, Storico e Prodotti stavano a 4,01 di contrasto, sotto i 4,5 che le
+     linee guida chiedono per il testo piccolo. E piccolo lo e' davvero: su uno
+     schermo da 320 px quelle tre scritte misurano 12,5 px, nemmeno i 13 di un
+     telefono normale. Nel tema scuro invece il velo bianco lavora a favore,
+     perche' li' l'inchiostro e' scuro e il velo lo allontana: 8,63, e non si
+     tocca.
+
+     Nel chiaro il velo quindi scurisce: la scheda spenta e' INCASSATA e quella
+     accesa e' sollevata e chiara, che e' anche il verso giusto del disegno. Il
+     contrasto sale da 4,01 a 6,64. */
+  --velo-scheda: rgba(0, 0, 0, .12);
+
   --fondo: #f1f5f9;
   --carta: #ffffff;
   --bordo: #cbd5e1;
@@ -63,6 +81,7 @@
     --viola-chiaro: #2e1065;
     --viola-testo: #e9d5ff;
     --su-pieno: #0b1220;      /* 7,5 sul verde chiaro, 7,1 sul viola chiaro */
+    --velo-scheda: rgba(255, 255, 255, .16);   /* qui il bianco va bene: 8,63 */
 
     --fondo: #0b1220;
     --carta: #16202e;
@@ -126,7 +145,7 @@ button { touch-action: manipulation; }
   padding: 0 2px;
   border: 0;
   border-radius: var(--raggio) var(--raggio) 0 0;
-  background: rgba(255, 255, 255, .16);
+  background: var(--velo-scheda);
   color: var(--su-pieno);
   font-weight: 600;
   font-size: clamp(.78rem, 3.3vw, 1rem);   /* quattro schede devono stare su 375 px */
@@ -329,8 +348,14 @@ main { flex: 1; min-height: 0; display: flex; }
   margin-bottom: 6px;
 }
 
+/* «Azzera» e' rimasto a lungo alto 36 px - 34 sul telefono basso - perche' si
+   preme di rado e perche' quei pixel li paga la griglia dei prodotti. Ma la
+   regola in testa a questo file non fa eccezioni, tasti dei tagli compresi, e un
+   pulsante che si preme di rado si preme di rado ANCHE DI FRETTA: e' quello che
+   si cerca quando si e' battuto il taglio sbagliato con la fila davanti. A 56 px
+   come tutti gli altri. */
 .azzera {
-  min-height: 36px;
+  min-height: 56px;
   padding: 0 12px;
   border: 1px solid var(--bordo);
   border-radius: 10px;
@@ -742,6 +767,32 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   line-height: 1.3;
 }
 
+/* Una striscia qualunque dice una cosa che si puo' anche finire di leggere con
+   comodo - «c'e' una versione nuova». Questa dice che i conti NON si stanno
+   salvando su questo telefono, e in quel momento non c'e' niente di piu' urgente
+   sullo schermo. Senza una regola sua prendeva il fondo carta di .striscia:
+   visibile, e per niente allarmante.
+
+   I colori sono quelli d'attenzione che il foglio ha gia', gli stessi di
+   .stato-rete.attenzione, e non ce ne sono di nuovi.
+
+   L'inchiostro pero' resta --testo e non --ambra. L'ambra sull'ambra chiaro nel
+   tema CHIARO fa 4,51: passa per un centesimo, e questo e' l'ultimo avviso su cui
+   si vuole passare per un centesimo. Con --testo sono 16,0 nel chiaro e 12,8
+   nello scuro, misurati tutti e due.
+
+   E il colore non e' l'unico segnale: la cornice ambra ce l'ha questa striscia e
+   nessun'altra, il testo e' piu' marcato, e soprattutto la striscia scrive a
+   parole cosa sta succedendo e cosa fare. Chi non distingue
+   l'ambra dal bianco carta vede comunque una striscia diversa da tutte le
+   altre. */
+.striscia.attenzione {
+  background: var(--ambra-chiaro);
+  border: 2px solid var(--ambra);
+  color: var(--testo);
+  font-weight: 600;
+}
+
 .striscia button {
   flex: none;
   min-height: 44px;
@@ -970,14 +1021,32 @@ h2 { font-size: 1.05rem; margin: 22px 0 8px; }
 
   .contatore { min-width: 26px; height: 24px; padding: 0 5px; font-size: .82rem; }
 
-  .conto { gap: 6px; padding-top: 8px; }
+  /* Un punto di respiro in meno fra i blocchi del conto, e uno nel riquadro del
+     resto piu' sotto: in tutto sei punti, che non si vedono a occhio e che servono
+     alla griglia dei prodotti per tenere due file intere invece di una e mezza.
+     Sono stati cercati qui, e non sui pulsanti, perche' i 56 px sono una regola
+     e un margine no. */
+  .conto { gap: 5px; padding-top: 8px; }
   .totale { padding: 3px 2px; font-size: 1rem; }
   .totale strong { font-size: clamp(1.6rem, 7vw, 2.4rem); }
   .etichetta-contanti { margin-bottom: 4px; font-size: .88rem; }
-  .azzera { min-height: 34px; }
+  /* Qui c'era «.azzera { min-height: 34px }», ed era l'unico pulsante che questo
+     blocco stringeva: la riga sopra dice «i 56 px dei pulsanti restano» e quella
+     era la smentita. Tolta.
+
+     Toglierlo costava una fila di prodotti: su 320x690 la griglia scendeva da 160
+     a 138 px, e le file intere passavano da DUE a UNA. Mancavano quattro punti,
+     quattro: due file di prodotti ne chiedono 142 e ce n'erano 138. Sono stati
+     trovati nei margini qui sopra invece che rimpicciolendo di nuovo il pulsante,
+     e adesso la griglia ne ha 144 - sei prodotti su sei, con due punti di avanzo.
+     «Incassa» non si muove: resta col bordo di sotto a 680 su 690, perche' il
+     conto e' ancorato in fondo e l'avanzo lo mette la griglia.
+
+     Su 375x667, che e' piu' basso, due file non ci stavano nemmeno prima: li' si
+     vedono tre prodotti e per gli altri si scorre, come e' sempre stato. */
   .tagli { gap: 5px; }
   .ricevuto { margin-top: 3px; font-size: .85rem; }
-  .resto { padding: 6px 12px; }
+  .resto { padding: 5px 12px; }
   .resto-cifra { font-size: clamp(1.9rem, 9vw, 3rem); }
   .btn { min-height: 56px; }
 }

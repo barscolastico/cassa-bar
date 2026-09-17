@@ -112,7 +112,20 @@ function avvisa() {
 
 /* Sempre POST, mai GET. Non e' un capriccio: la cassaforte offline dell'app mette
    da parte le letture, e una risposta del server messa in cassaforte vorrebbe dire
-   vedere per giorni un listino vecchio senza capire perche'. */
+   vedere per giorni un listino vecchio senza capire perche'.
+
+   Quando va male, questa funzione rifiuta la promessa - e chi la riceve deve poter
+   capire QUALE dei due guai e' capitato, perche' la cura e' opposta:
+
+     - non e' arrivata nessuna risposta: rete staccata, wifi della scuola giu',
+       otto secondi scaduti. Si riprova, e prima o poi passa;
+     - una risposta e' arrivata ed e' un no motivato. Riprovare la stessa cosa non
+       la fa diventare buona: una data del 1970 sara' sbagliata anche domani.
+
+   Fino al 17 settembre 2026 i due casi arrivavano identici - un Error e basta - e
+   la cassa non poteva distinguerli: § La coda degli invii in cassa.md. Adesso
+   l'errore che nasce da una RISPOSTA se lo porta scritto addosso, insieme al codice
+   che il server ha usato. Chi non guarda quei due campi si comporta come prima. */
 function chiedi(azione, dati) {
   if (!INDIRIZZO) {
     return Promise.reject(new Error('indirizzo del server non configurato'));
@@ -128,6 +141,10 @@ function chiedi(azione, dati) {
     taglia = window.setTimeout(function () { ferma.abort(); }, TEMPO_MASSIMO);
   }
 
+  /* Lo stato va preso al volo qui sotto, dove la risposta c'e' ancora: nel passo
+     dopo si ha in mano solo quello che c'era scritto dentro. */
+  var stato_http = 0;
+
   return fetch(INDIRIZZO, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -135,10 +152,14 @@ function chiedi(azione, dati) {
     signal: ferma ? ferma.signal : undefined,
     cache: 'no-store'
   }).then(function (risposta) {
+    stato_http = risposta.status;
     return risposta.json().catch(function () { return { ok: false, errore: 'risposta illeggibile' }; });
   }).then(function (esito) {
     if (!esito || esito.ok !== true) {
-      throw new Error((esito && esito.errore) ? esito.errore : 'il server ha detto di no');
+      var guasto = new Error((esito && esito.errore) ? esito.errore : 'il server ha detto di no');
+      guasto.rispostaDelServer = true;
+      guasto.stato = stato_http;
+      throw guasto;
     }
     return esito;
   }).finally(function () {

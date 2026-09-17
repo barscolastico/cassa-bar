@@ -136,9 +136,48 @@ function zip(parti) {
 /* Un carattere fuori posto qui dentro e Word dice «il file e' danneggiato» senza
    spiegare altro: il nome di un prodotto con una & o una virgoletta romperebbe
    l'intero documento. Sono quattro sostituzioni e vanno fatte su OGNI testo che
-   arriva da fuori. */
+   arriva da fuori.
+
+   Ma le quattro sostituzioni non bastano, e non e' una pignoleria: ci sono
+   caratteri che l'XML 1.0 non ammette PROPRIO - nemmeno scritti per esteso come
+   &#0; - e un solo carattere di quelli ammazza il file prima ancora che arrivi a
+   Word. Provato il 17 settembre 2026: un prodotto chiamato «Acqua<NUL>naturale»
+   produce un .docx che LibreOffice - il riferimento dichiarato in documento.md -
+   si rifiuta di aprire, e non tira fuori nemmeno il titolo. Il guaio e' che un
+   nome cosi' non resta sul telefono di chi l'ha battuto: va nel listino che il
+   server passa a TUTTI i dispositivi, e da quel momento la giornata in Word non
+   si scarica piu' da nessuna parte.
+
+   I proibiti sono tre famiglie, e si riconoscono cosi':
+
+   - i caratteri di comando sotto lo spazio, TRANNE tabulazione (\x09), a capo
+     (\x0A) e ritorno a capo (\x0D), che invece sono legittimi e vanno tenuti:
+     un nome scritto su due righe deve restare su due righe;
+   - i due «non caratteri» in fondo al piano base, U+FFFE e U+FFFF, che non sono
+     caratteri di comando e passerebbero inosservati a un controllo fatto solo
+     sui codici bassi;
+   - meta' di una coppia surrogata rimasta da sola. Gli emoji sono scritti a
+     coppie - due pezzi che valgono un carattere solo - e se ne arriva uno
+     spaiato, per un nome tagliato a meta' da qualche parte, quel pezzo da solo
+     e' illegale tanto quanto un NUL.
+
+   Al posto di ognuno si mette «�», il rombo col punto interrogativo. Non si
+   toglie e basta per due ragioni: cancellandolo «Acqua<NUL>naturale» diventerebbe
+   «Acquanaturale» e il difetto sparirebbe dalla vista invece che dal foglio; e
+   perche' e' gia' la sostituzione che TextEncoder fa da se' sui surrogati
+   spaiati, quindi cosi' le tre famiglie si comportano tutte allo stesso modo.
+
+   Questa e' la seconda rete, non la prima: i nomi cattivi il server li rifiuta
+   in ingresso. Serve lo stesso, perche' un nome puo' arrivare anche da uno stato
+   salvato sul telefono da prima che quel cancello esistesse. */
 function xml(testo) {
   return String(testo)
+    // L'alternanza guarda prima la coppia intera: se e' buona resta com'e',
+    // e quello che avanza e' per forza un pezzo spaiato.
+    .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (c) {
+      return c.length === 2 ? c : '�';
+    })
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/g, '�')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -183,9 +222,33 @@ function paragrafo(testo, m) {
 }
 
 /* La prima colonna e' il nome del prodotto e si prende lo spazio che avanza; le
-   altre sono numeri e stanno strette. */
+   altre sono numeri e stanno strette.
+
+   «Quello che avanza» regge finche' le colonne sono poche, e poi si ribalta: a
+   1900 l'una, da SETTE colonne in su le strette si mangiano piu' dell'intero
+   foglio e alla prima ne restava meno di zero - con sette veniva -1762. Una
+   larghezza negativa in un documento Word non vuol dire niente: l'OOXML dichiara
+   w:w come misura senza segno.
+
+   Va detto quanto e' grave davvero: oggi la giornata stampa TRE colonne - le
+   passa scaricaGiornataWord() in cassa.js - e il conto non ci arriva nemmeno
+   vicino. Non e' un guasto in corso, e' una trappola per il giorno in cui
+   qualcuno aggiunge una colonna. La si chiude adesso perche' costa tre righe e
+   perche' quel giorno il sintomo sarebbe di nuovo «il file e' danneggiato», che
+   non dice a nessuno dove guardare.
+
+   Il conto si fa al contrario: prima si mette da parte il minimo per il nome -
+   2268, cioe' quattro centimetri, sotto i quali «Cornetto alla crema» non sta su
+   una riga - e solo quello che resta si divide fra le altre. Cosi' a stringersi
+   sono le colonne dei numeri, che sono cifre corte e se lo possono permettere,
+   e non la prima, che sparirebbe. Con tre colonne il risultato non cambia di un
+   ventesimo di punto: 1900 sta ben dentro il margine, e il foglio di oggi resta
+   identico a prima. */
 function larghezze(quante) {
-  var stretta = 1900;
+  var MINIMA = 2268;
+  if (quante < 2) { return [LARGHEZZA]; }
+
+  var stretta = Math.max(1, Math.min(1900, Math.floor((LARGHEZZA - MINIMA) / (quante - 1))));
   var colonne = [LARGHEZZA - stretta * (quante - 1)];
   for (var i = 1; i < quante; i++) { colonne.push(stretta); }
   return colonne;
@@ -197,7 +260,19 @@ function rigaTabella(celle, colonne, m) {
   var out = '<w:tr>';
 
   celle.forEach(function (testo, i) {
-    var c = '<w:tcPr><w:tcW w:w="' + colonne[i] + '" w:type="dxa"/>';
+    /* Una riga puo' avere piu' celle dell'intestazione - basta che chi prepara i
+       blocchi aggiunga un campo a una riga sola e si scordi dell'intestazione. In
+       quel caso colonne[i] non esiste, e nell'attributo finiva scritto
+       w:w="undefined", che non e' un numero: l'XML si legge lo stesso, ma la
+       misura non c'e' piu'. Si ripiega sull'ultima larghezza dichiarata - quella
+       delle colonne dei numeri, che e' anche la piu' probabile per una cella in
+       piu' - invece di buttare via la cella: un dato che si vede storto si
+       corregge, un dato sparito non lo cerca nessuno. */
+    var larga = colonne[i] === undefined
+      ? (colonne.length ? colonne[colonne.length - 1] : LARGHEZZA)
+      : colonne[i];
+
+    var c = '<w:tcPr><w:tcW w:w="' + larga + '" w:type="dxa"/>';
     if (m.sfondo) { c += '<w:shd w:val="clear" w:color="auto" w:fill="' + m.sfondo + '"/>'; }
     c += '</w:tcPr>';
 

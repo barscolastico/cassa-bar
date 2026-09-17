@@ -118,12 +118,31 @@ function annoScolastico(iso) {
   return m >= 9 ? a + '/' + (a + 1) : (a - 1) + '/' + a;
 }
 
+/* Un numero che rappresenta dei soldi o dei pezzi, cosi' come lo pretende il server:
+   intero e non negativo. Tutto il resto - la virgola, il segno meno, «620» scritto
+   come stringa, NaN - vale zero.
+
+   Non e' pignoleria e non e' nemmeno solo pulizia: server.js questi numeri li
+   rifiuta, e li rifiuta PER SEMPRE. Una giornata con un incasso di 1234,5678 o di
+   -750 non arriva mai, e prima del 17 settembre 2026 restava a riprovare in eterno
+   tenendo ferme tutte le altre, § spingiCoda. Si taglia qui, quando si rilegge da
+   casa, che e' l'unico punto in cui quella roba puo' entrare. */
+function interoNonNegativo(x) {
+  if (!Number.isFinite(x)) { return 0; }
+  var n = Math.round(x);
+  return n > 0 ? n : 0;
+}
+
 /* Le voci di una giornata, ripulite. Non e' pignoleria: una 'qta' che non e' un
    numero fa comparire «0due» al posto dei pezzi venduti, e una voce nulla fa saltare
    in aria le schermate Giornata e Storico - schermata morta, e per rimetterla in
    piedi bisognerebbe svuotare la memoria del browser, cioe' buttare via anche le
    giornate che non sono ancora arrivate al server. Il server fa questo stesso
-   controllo su quello che riceve; qui si fa su quello che si rilegge da casa. */
+   controllo su quello che riceve; qui si fa su quello che si rilegge da casa.
+
+   Il segno conta quanto il tipo: una voce con qta -5 e somma -300 - «Resi», scritta a
+   mano da qualcuno - passava indenne e il server la rifiutava per sempre. Una voce
+   negativa non si sistema, si butta: non esiste un mezzo panino venduto in meno. */
 function vociBuone(grezze) {
   var pulite = {};
   if (!grezze || typeof grezze !== 'object') { return pulite; }
@@ -133,6 +152,7 @@ function vociBuone(grezze) {
     if (!v || typeof v !== 'object') { return; }
     if (typeof v.nome !== 'string' || v.nome.length === 0) { return; }
     if (!Number.isFinite(v.qta) || !Number.isFinite(v.somma)) { return; }
+    if (Math.round(v.qta) < 0 || Math.round(v.somma) < 0) { return; }
     pulite[k] = { nome: v.nome, qta: Math.round(v.qta), somma: Math.round(v.somma) };
   });
 
@@ -219,9 +239,26 @@ function carica() {
   }
 
   if (letto.vendita && Array.isArray(letto.vendita.righe)) {
+    /* Il prezzo congelato non c'era prima del 17 settembre 2026, e una vendita
+       lasciata a meta' la sera prima si rilegge qui senza. A quella riga si da' il
+       prezzo del listino di ADESSO: e' l'unico che si conosca, e chiedere al cassiere
+       di indovinare quello di ieri non ha senso. Se invece il prodotto non c'e' piu',
+       la riga si scarta come si e' sempre fatto - senza prodotto e senza prezzo
+       congelato non resta niente da scrivere sul conto, nemmeno il nome.
+
+       Da qui in avanti il caso non si presenta piu': aggiungiPezzo scrive il prezzo
+       al primo tocco, e chi legge questo stato lo trova gia' dentro. */
     s.vendita.righe = letto.vendita.righe.filter(function (r) {
       return r && r.id && Number.isFinite(r.qta) && r.qta > 0;
-    }).map(function (r) { return { id: r.id, qta: Math.round(r.qta) }; });
+    }).map(function (r) {
+      var p = s.prodotti.filter(function (x) { return x.id === r.id; })[0] || null;
+      var prezzo = Number.isFinite(r.prezzo) && r.prezzo >= 0
+        ? Math.round(r.prezzo) : (p ? p.prezzo : null);
+      if (prezzo === null) { return null; }
+      var nome = typeof r.nome === 'string' && r.nome.length > 0
+        ? r.nome : (p ? p.nome : 'Prodotto tolto');
+      return { id: r.id, qta: Math.round(r.qta), prezzo: prezzo, nome: nome };
+    }).filter(function (r) { return r !== null; });
     s.vendita.contanti = Number.isFinite(letto.vendita.contanti) && letto.vendita.contanti > 0
       ? Math.round(letto.vendita.contanti) : 0;
     s.vendita.buono = Number.isFinite(letto.vendita.buono) && letto.vendita.buono > 0
@@ -229,12 +266,22 @@ function carica() {
   }
 
   if (letto.giornata && typeof letto.giornata.data === 'string') {
-    s.giornata = {
+    /* I numeri si raddrizzano PRIMA di chiedere a quotaBuoni e quotaCrediti quanto
+       vale ogni parte: quelle due prendono l'incasso come tetto, e su un incasso
+       negativo darebbero un tetto negativo, cioe' due numeri rotti al posto di uno. */
+    var giornata_pulita = {
       data: letto.giornata.data,
-      vendite: Number.isFinite(letto.giornata.vendite) ? letto.giornata.vendite : 0,
-      incasso: Number.isFinite(letto.giornata.incasso) ? letto.giornata.incasso : 0,
-      buoni: quotaBuoni(letto.giornata),
-      crediti: quotaCrediti(letto.giornata),
+      vendite: interoNonNegativo(letto.giornata.vendite),
+      incasso: interoNonNegativo(letto.giornata.incasso),
+      buoni: letto.giornata.buoni,
+      crediti: letto.giornata.crediti
+    };
+    s.giornata = {
+      data: giornata_pulita.data,
+      vendite: giornata_pulita.vendite,
+      incasso: giornata_pulita.incasso,
+      buoni: quotaBuoni(giornata_pulita),
+      crediti: quotaCrediti(giornata_pulita),
       voci: vociBuone(letto.giornata.voci)
     };
   }
@@ -249,38 +296,56 @@ function carica() {
     s.mio = mie.filter(function (g) {
       return g && typeof g.data === 'string' && Number.isFinite(g.incasso);
     }).map(function (g) {
+      // Stessa regola della cassa aperta: prima si raddrizzano i numeri, poi si divide.
+      var pulita = {
+        incasso: interoNonNegativo(g.incasso),
+        buoni: g.buoni,
+        crediti: g.crediti
+      };
       return {
         data: g.data,
-        vendite: Number.isFinite(g.vendite) ? g.vendite : 0,
-        incasso: g.incasso,
-        buoni: quotaBuoni(g),
-        crediti: quotaCrediti(g),
+        vendite: interoNonNegativo(g.vendite),
+        incasso: pulita.incasso,
+        buoni: quotaBuoni(pulita),
+        crediti: quotaCrediti(pulita),
         voci: vociBuone(g.voci),
         automatica: !!g.automatica,
         inviata: g.inviata === true,
         /* Fuori dai conti: il server l'ha presa ma quel giorno era stato tolto. La
            riga resta qui per intero - e' il totale che si continua a mandare - ma
            non entra in nessun totale. Un salvataggio vecchio non ce l'ha: vale no. */
-        fuori: g.fuori === true
+        fuori: g.fuori === true,
+        // Quante volte il server l'ha rifiutata, e perche': § spingiCoda, § descriviRete.
+        tentativi: interoNonNegativo(g.tentativi),
+        motivo: typeof g.motivo === 'string' ? g.motivo.slice(0, 120) : ''
       };
     });
   }
 
   /* Formato vecchio: la giornata non chiusa stava da sola in 'precedente' e si perdeva
-     al giorno dopo. Adesso c'e' lo storico, quindi la si recupera li' dentro. */
+     al giorno dopo. Adesso c'e' lo storico, quindi la si recupera li' dentro.
+
+     Il Number.isFinite qui non c'era, ed era l'unico ramo che ne fosse senza: un
+     incasso scritto come stringa - «620» - passava, perche' '620' > 0 e' vero. Poi
+     archivia() ci sommava dentro la chiusura dopo, e in JavaScript '620' + 100 fa
+     '620100': 6,20 € piu' 1,00 € diventavano 6.201,00 €, e da li' in poi ogni somma
+     dell'anno era una concatenazione di stringhe. */
   if (letto.precedente && typeof letto.precedente === 'object' &&
-      typeof letto.precedente.data === 'string' && letto.precedente.incasso > 0) {
+      typeof letto.precedente.data === 'string' &&
+      Number.isFinite(letto.precedente.incasso) && letto.precedente.incasso > 0) {
     var gia = s.mio.some(function (g) { return g.data === letto.precedente.data; });
     if (!gia) {
       s.mio.push({
         data: letto.precedente.data,
-        vendite: Number.isFinite(letto.precedente.vendite) ? letto.precedente.vendite : 0,
-        incasso: letto.precedente.incasso,
+        vendite: interoNonNegativo(letto.precedente.vendite),
+        incasso: interoNonNegativo(letto.precedente.incasso),
         buoni: 0,
         crediti: 0,
         voci: {},
         automatica: true,
-        inviata: false
+        inviata: false,
+        tentativi: 0,
+        motivo: ''
       });
     }
   }
@@ -290,8 +355,67 @@ function carica() {
   return s;
 }
 
+/* Vero quando l'ultimo salvataggio non e' riuscito: memoria del browser piena, o
+   spenta dalle impostazioni. Non e' salvato da nessuna parte - e' proprio quello che
+   non si riesce a fare - e vive finche' l'app resta aperta. */
+var salvataggio_fallito = false;
+
+/* Scrivere lo stato, e ACCORGERSI se non ci si riesce.
+
+   Qui c'era «niente da fare», e il costo misurato e' questo: dieci salvataggi
+   rifiutati, lo schermo che dice 8,50 € e il disco che ne conserva 4,00. Quei 4,50 €
+   sparivano al primo ricaricamento della pagina, senza che niente lo avesse mai
+   detto. E se la memoria si riempie proprio alla chiusura di cassa e' peggio: la
+   giornata arriva al server, sul telefono non ne resta traccia, riaprendo risulta
+   ancora aperta e riparte una seconda volta.
+
+   Non si avvisa con window.alert: si salva a ogni tocco di prodotto, e un alert per
+   vendita bloccherebbe il banco con la fila davanti. Si accende una striscia, che
+   resta li' finche' il guaio c'e' e sparisce da sola quando passa. */
 function salva() {
-  try { window.localStorage.setItem(CHIAVE, JSON.stringify(stato)); } catch (e) { /* niente da fare */ }
+  try {
+    window.localStorage.setItem(CHIAVE, JSON.stringify(stato));
+    if (salvataggio_fallito) { salvataggio_fallito = false; avvisaSalvataggio(); }
+  } catch (e) {
+    if (!salvataggio_fallito) { salvataggio_fallito = true; avvisaSalvataggio(); }
+  }
+}
+
+// La striscia del salvataggio che non riesce, appesa e staccata una volta sola.
+var striscia_salvataggio = null;
+
+/* Sopra le schede, dove sta gia' l'avviso della versione nuova: e' l'unico posto
+   che si vede anche dalla schermata Cassa, che e' quella su cui si sta quando
+   succede. Non copre i pulsanti della vendita - un avviso non si mette mai davanti
+   al lavoro, § avvisaVersioneNuova - e non chiede di premere niente, perche' non
+   c'e' niente da premere: i conti vanno letti dallo schermo e scritti a mano.
+
+   Tutto dentro un try: se il disegno non riesce, salva() non deve fallire per
+   quello. Un salvataggio che va a buon fine e un avviso che non si disegna sono due
+   guai diversi, e il secondo non deve diventare il primo. */
+function avvisaSalvataggio() {
+  try {
+    if (!salvataggio_fallito) {
+      if (striscia_salvataggio) { striscia_salvataggio.remove(); striscia_salvataggio = null; }
+      return;
+    }
+    if (striscia_salvataggio) { return; }
+
+    var striscia = document.createElement('div');
+    striscia.id = 'striscia-salvataggio';
+    striscia.className = 'striscia attenzione';
+
+    var testo = document.createElement('span');
+    testo.textContent = 'I conti NON si stanno salvando su questo dispositivo: ' +
+      'la memoria del browser è piena. Non chiudere l’app e segna a mano quello ' +
+      'che vedi sullo schermo.';
+
+    striscia.appendChild(testo);
+
+    var testata = document.querySelector('.testata');
+    testata.insertBefore(striscia, testata.querySelector('.schede'));
+    striscia_salvataggio = striscia;
+  } catch (e) { /* senza striscia resta la riga di descriviRete: § lo stato della rete */ }
 }
 
 /* Somma le voci di una giornata dentro un'altra: per ogni prodotto, i pezzi e
@@ -336,6 +460,12 @@ function archivia(giornata, automatica) {
     sommaVoci(esistente.voci, giornata.voci);
     if (!automatica) { esistente.automatica = false; }
     esistente.inviata = false;
+    /* Il totale e' cambiato, quindi quello che si manda non e' piu' quello che il
+       server ha rifiutato: i tentativi ripartono da zero. Se il difetto era nei
+       numeri - un dettaglio prodotti storto, un incasso non intero - adesso puo'
+       essere passato, e non deve restare bloccata per una colpa vecchia. */
+    esistente.tentativi = 0;
+    esistente.motivo = '';
     return;
   }
 
@@ -348,7 +478,10 @@ function archivia(giornata, automatica) {
     voci: giornata.voci,
     automatica: !!automatica,
     inviata: false,
-    fuori: false
+    fuori: false,
+    // Quante volte il server l'ha rifiutata, e con che parole: § spingiCoda.
+    tentativi: 0,
+    motivo: ''
   });
   stato.mio.sort(function (a, b) { return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
 }
@@ -572,6 +705,68 @@ function giorniFuoriDaSegnalare() {
   return elenco.sort();
 }
 
+/* Quante volte si riprova a mandare LA STESSA giornata quando non si capisce cos'e'
+   andato storto, prima di dire che non partira' mai piu'.
+
+   E' una rete di sicurezza, non piu' il modo normale di decidere: da quando
+   sincronia.js dice se una risposta e' arrivata e con che codice, § esitoDelRifiuto,
+   un «no» del server si riconosce al primo colpo e una linea caduta si riprova per
+   sempre. Il contatore serve solo ai casi che restano in mezzo - una risposta
+   arrivata con un codice che non dice niente, tipo un 200 con dentro un «no», o un
+   proxy che restituisce una pagina HTML al posto della risposta.
+
+   Tre, non cinque: adesso copre pochi casi strani, e non c'e' motivo di girare a
+   vuoto per due minuti buoni prima di dirlo a chi sta al banco. */
+var TENTATIVI_PRIMA_DI_ARRENDERSI = 3;
+
+/* Una giornata che ha esaurito i tentativi: si smette di riprovarla, si continua a
+   tenerla qui dentro coi suoi soldi, e la si dice a chi guarda lo schermo,
+   § descriviRete. Non si butta via mai: e' il totale di quel giorno su questo
+   dispositivo, e il giorno che il difetto si sistema riparte da sola. */
+function giornataBloccata(g) {
+  return !g.inviata && (g.tentativi || 0) >= TENTATIVI_PRIMA_DI_ARRENDERSI;
+}
+
+function giornateBloccate() {
+  return stato.mio.filter(giornataBloccata);
+}
+
+/* «La linea e' caduta» oppure «il server ha detto di no, e lo dira' sempre». La
+   differenza cambia tutto: la prima si riprova all'infinito, la seconda no.
+
+   Dal 17 settembre 2026 l'informazione c'e', e arriva da sincronia.js: l'errore che
+   nasce da una risposta vera se lo porta scritto addosso ('rispostaDelServer') e si
+   porta anche il codice. Da li' si legge tutto:
+
+     - niente marchio: non e' arrivata nessuna risposta - rete staccata, otto secondi
+       scaduti, wifi della scuola giu'. PASSEGGERO, si riprova sempre. E' il caso
+       normale dell'intervallo, e venti giorni in coda non devono arrendersi per un
+       pomeriggio senza rete;
+     - marchio e codice 4xx: il server ha guardato quello che gli e' arrivato e ha
+       detto di no. Un «no» del genere e' sulla cosa mandata - una data del 1970, un
+       incasso non intero, un dettaglio prodotti storto - e domani sara' lo stesso
+       no. DEFINITIVO, e si vede al primo colpo;
+     - marchio e codice 5xx: il server si e' rotto lui. La giornata non c'entra
+       niente e fra un minuto puo' passare. PASSEGGERO;
+     - il 429 e' l'eccezione dentro i 4xx: «troppi dispositivi registrati» vuol dire
+       riprova piu' tardi, non e' un difetto di questa giornata;
+     - tutto il resto - marchio ma codice che non dice niente, tipo un 200 con
+       dentro un «no», o un proxy che risponde HTML - e' AMBIGUO, e li' decide il
+       contatore, § TENTATIVI_PRIMA_DI_ARRENDERSI.
+
+   Non si guarda piu' se siamo collegati: serviva quando l'unico indizio era il tipo
+   dell'errore. Adesso il marchio dice da solo che una risposta e' arrivata, che e'
+   la stessa cosa detta meglio. */
+function esitoDelRifiuto(guasto) {
+  if (!guasto || !guasto.rispostaDelServer) { return 'passeggero'; }
+
+  var codice = Number(guasto.stato);
+  if (codice === 429) { return 'passeggero'; }
+  if (codice >= 500) { return 'passeggero'; }
+  if (codice >= 400 && codice < 500) { return 'definitivo'; }
+  return 'ambiguo';
+}
+
 /* Le giornate mie che non sono ancora arrivate al server. Si riprova a ogni giro di
    controllo e a ogni rientro nell'app: chiudere la cassa senza rete non deve far
    perdere niente, e infatti non lo fa - i conti restano qui e partono da soli.
@@ -579,12 +774,19 @@ function giorniFuoriDaSegnalare() {
    Se qualcuno chiede di spingere mentre un tentativo e' ancora per aria - succede
    quando la rete torna proprio mentre quello di prima sta scadendo - la richiesta
    non si butta via: si rifa' appena l'altro ha finito. Una giornata che aspetta e'
-   l'unica cosa qui dentro che non deve restare indietro. */
+   l'unica cosa qui dentro che non deve restare indietro.
+
+   Ogni giornata si tenta PER CONTO SUO. Fino al 17 settembre 2026 la catena si
+   spezzava al primo rifiuto - il .catch() stava fuori dal reduce - e le giornate
+   dietro non venivano nemmeno tentate: un tablet con l'orologio al 1970 che
+   chiudeva una cassa da 12,50 € teneva ferme venti giornate vere, 887,70 €,
+   ritentate ogni venticinque secondi all'infinito senza che niente lo dicesse.
+   Adesso il rifiuto di una non tocca le altre. */
 function spingiCoda() {
   if (!window.Sincronia.configurato()) { return Promise.resolve(); }
   if (invio_in_corso) { coda_da_rifare = true; return Promise.resolve(); }
 
-  var rimaste = stato.mio.filter(function (g) { return !g.inviata; });
+  var rimaste = stato.mio.filter(function (g) { return !g.inviata && !giornataBloccata(g); });
   if (rimaste.length === 0) { return Promise.resolve(); }
 
   invio_in_corso = true;
@@ -611,13 +813,39 @@ function spingiCoda() {
         var era_fuori = g.fuori === true;
         g.inviata = true;
         g.fuori = !!(esito && esito.annullata);
+        g.tentativi = 0;
+        g.motivo = '';
         if (g.fuori !== era_fuori) { cambiato = true; }
         if (g.fuori) { segnaUscitaDalConto(g.data); }
+        salva();
+      }, function (guasto) {
+        /* Questa non e' partita. La catena CONTINUA lo stesso: il secondo argomento
+           di then() e' quello che tiene in piedi la fila, perche' riporta la catena
+           sul binario buono invece di lasciarla rifiutata fino in fondo.
+
+           Poi si guarda che guasto e', § esitoDelRifiuto. Un «no» del server
+           consuma in un colpo solo tutti i tentativi: non c'e' niente da aspettare,
+           domani dira' la stessa cosa, e far girare la coda a vuoto per altri due
+           giri servirebbe solo a ritardare l'avviso a chi sta al banco.
+
+           Il motivo si tiene per scriverlo a schermo: «non parte» senza il perche'
+           non aiuta nessuno a capire che il difetto e' l'orologio del tablet. */
+        var come = esitoDelRifiuto(guasto);
+        if (come === 'passeggero') { return; }
+
+        g.tentativi = come === 'definitivo'
+          ? TENTATIVI_PRIMA_DI_ARRENDERSI
+          : (g.tentativi || 0) + 1;
+        g.motivo = String((guasto && guasto.message) || 'il server ha detto di no').slice(0, 120);
+        if (giornataBloccata(g)) { cambiato = true; }
         salva();
       });
     });
   }, Promise.resolve()).catch(function () {
-    // Linea persa a meta': quelle che restano riprovano al giro dopo.
+    /* Rete di sicurezza. Qui non ci arriva piu' il rifiuto di una giornata - quello
+       lo prende il then() qui sopra, una giornata per volta - ma se ci arrivasse
+       qualcos'altro, 'invio_in_corso' deve tornare falso lo stesso: restasse vero,
+       la coda non ripartirebbe mai piu'. */
   }).then(function () {
     invio_in_corso = false;
     if (cambiato) { ridisegnaQuelloCheSiVede(); }
@@ -641,8 +869,11 @@ function adottaProdotti() {
   if (JSON.stringify(nuovo) === JSON.stringify(stato.prodotti)) { return false; }
 
   stato.prodotti = nuovo;
-  // Le righe della vendita aperta che puntano a un prodotto sparito si tolgono.
-  stato.vendita.righe = stato.vendita.righe.filter(function (r) { return prodottoCon(r.id) !== null; });
+  /* La vendita aperta NON si tocca. Qui prima si buttavano via le righe che puntavano
+     a un prodotto sparito: un altro dispositivo riscriveva il listino con id nuovi e
+     il carrello si svuotava da solo, senza un avviso, con le pizzette gia' in mano al
+     cliente. Adesso ogni riga sa quanto costa e come si chiama, § il prezzo
+     congelato, e il listino nuovo comincia a valere dalla vendita dopo. */
   salva();
   return true;
 }
@@ -659,7 +890,20 @@ function copiaProdotti() {
 
    Se dice di no, o se la linea cade, si rimette esattamente quello che c'era prima.
    Meglio nessuna modifica che due dispositivi con due listini diversi, perche' due
-   listini diversi vogliono dire due prezzi diversi allo stesso banco. */
+   listini diversi vogliono dire due prezzi diversi allo stesso banco.
+
+   «Quello che c'era prima» e' il LISTINO, e soltanto quello. La vendita aperta qui
+   non si tocca ne' all'andata ne' al ritorno, ed e' una regola da difendere: la
+   richiesta puo' stare per aria fino a otto secondi, e in quegli otto secondi il
+   cassiere batte. Rimettere a posto anche le righe vorrebbe dire cancellargli i
+   pezzi aggiunti nel frattempo - lo stesso guaio di prima con la maschera nuova.
+
+   Il guaio di prima: fino al 17 settembre 2026 eliminare un prodotto toglieva anche
+   la sua riga dal conto, e al rifiuto del server il listino tornava indietro e la
+   riga no. A schermo si leggeva «Il listino non è stato cambiato: il server non
+   risponde», la Pizzetta era di nuovo li', e 6,00 € erano spariti dal conto in corso
+   - col cliente che aveva le pizzette in mano. Adesso nessuno tocca il conto, quindi
+   non c'e' niente da rimettere. */
 function salvaProdotti(prima) {
   salva();
   disegnaProdotti();
@@ -673,9 +917,12 @@ function salvaProdotti(prima) {
     disegnaProdotti();
   }, function (e) {
     stato.prodotti = prima;
-    stato.vendita.righe = stato.vendita.righe.filter(function (r) { return prodottoCon(r.id) !== null; });
     salva();
     disegnaProdotti();
+    /* Anche la griglia e il conto: i prezzi del listino si vedono sui pulsanti dei
+       prodotti, e quelli sono tornati indietro. Le righe della vendita no, perche'
+       il prezzo se lo sono congelato al tocco. */
+    disegnaTutto();
     window.alert('Il listino non è stato cambiato: ' + (e.message || 'il server non risponde.'));
   });
 }
@@ -686,6 +933,18 @@ function descriviRete(nodo) {
   if (!nodo) { return; }
   nodo.className = 'stato-rete';
 
+  /* Prima di qualunque discorso sul server: se non si riesce nemmeno a scrivere qui,
+     non c'e' niente di piu' urgente da dire. La striscia in testata lo dice gia' a
+     chi sta alla cassa, § salva(); questa riga lo ripete nelle tre schermate dove si
+     guardano i conti, che sono quelle da cui si va a controllare se tornano. */
+  if (salvataggio_fallito) {
+    nodo.classList.add('attenzione');
+    nodo.textContent = 'I conti non si stanno salvando su questo dispositivo: la ' +
+      'memoria del browser è piena. Quello che vedi sullo schermo c’è, ma chiudendo ' +
+      'l’app si perde. Segnalo a mano prima di chiudere.';
+    return;
+  }
+
   if (!window.Sincronia.configurato()) {
     nodo.textContent = 'Server non impostato: i conti restano su questo dispositivo, ' +
       'non si vedono altrove, e da qui si può cambiare tutto. È l’app di prima. ' +
@@ -693,7 +952,33 @@ function descriviRete(nodo) {
     return;
   }
 
-  /* Prima di tutto il resto, se e' successo: una giornata e' arrivata al server e li' e'
+  /* Prima di tutto il resto: le giornate che al server non arriveranno mai, perche'
+     le rifiuta e continuera' a rifiutarle. Viene prima persino dei giorni tolti dai
+     conti, perche' li' i soldi sul server ci sono e si possono rimettere dentro con
+     un tocco dal pannello, mentre qui non ci sono mai arrivati - e finche' nessuno
+     lo dice, «Sto mandando 21 giornate al server» resta scritto per sempre e sembra
+     tutto a posto.
+
+     Il perche' si scrive per intero, con le parole del server: «data non valida» su
+     un giorno del 1970 dice da solo che e' l'orologio del tablet, e senza quello
+     resterebbe da indovinare. */
+  var bloccate = giornateBloccate();
+
+  if (bloccate.length > 0) {
+    nodo.classList.add('attenzione');
+    nodo.textContent = bloccate.length === 1
+      ? 'La cassa di ' + dataLunga(bloccate[0].data) + ' non riesce ad arrivare al ' +
+        'server: ' + (bloccate[0].motivo || 'il server la rifiuta') + '. I conti ' +
+        'restano qui e contano nei totali, ma quel giorno va sistemato a mano.'
+      : bloccate.length + ' giornate non riescono ad arrivare al server (' +
+        bloccate.map(function (g) {
+          return dataLunga(g.data) + ': ' + (g.motivo || 'rifiutata');
+        }).join('; ') + '). I conti restano qui e contano nei totali, ma quei ' +
+        'giorni vanno sistemati a mano.';
+    return;
+  }
+
+  /* Poi, se e' successo: una giornata e' arrivata al server e li' e'
      rimasta fuori dai conti, perche' quel giorno era stato tolto. E' piu' importante di
      sapere se siamo collegati - sono soldi battuti che non entrano in nessun totale - e
      la riga lo dice finche' l'app resta aperta. */
@@ -842,14 +1127,51 @@ function prodottoCon(id) {
   return null;
 }
 
-// Le righe che puntano a un prodotto cancellato non devono far crollare il conto.
+/* ------------------------------------------------- il prezzo congelato
+
+   Una riga della vendita e' { id, qta, prezzo, nome }: si porta dietro il prezzo e
+   il nome del momento in cui il prodotto e' stato toccato, e non li rilegge piu' dal
+   listino. Il listino nuovo vale dalla vendita dopo.
+
+   Prima non era cosi', e succedevano due cose. La prima: adottaProdotti() adotta il
+   listino del server ogni venticinque secondi, e un carrello aperto cambiava totale
+   sotto le dita del cassiere - 3,00 € annunciati al cliente, 6,00 € chiesti dalla
+   cassa, senza che niente si muovesse sullo schermo tranne il numero. La seconda: se
+   il listino nuovo aveva id nuovi, le righe non trovavano piu' il loro prodotto e il
+   carrello si svuotava da solo, in silenzio, con la merce gia' sul banco.
+
+   Decisione della proprietaria, 17 settembre 2026: si congela. Il prezzo che il
+   cliente si e' sentito dire e' quello che paga. */
+function prezzoDiRiga(r) {
+  /* Una riga senza prezzo e' una riga di prima del congelamento, o costruita a mano:
+     vale il listino di adesso, e se il prodotto non c'e' piu' vale zero - ma quella
+     riga righeVive() l'ha gia' buttata via, § qui sotto. */
+  if (Number.isFinite(r.prezzo) && r.prezzo >= 0) { return Math.round(r.prezzo); }
+  var p = prodottoCon(r.id);
+  return p ? p.prezzo : 0;
+}
+
+// Come sopra per il nome: quello congelato, se no quello del listino, se no un ripiego.
+function nomeDiRiga(r) {
+  if (typeof r.nome === 'string' && r.nome.length > 0) { return r.nome; }
+  var p = prodottoCon(r.id);
+  return p ? p.nome : 'Prodotto tolto';
+}
+
+/* Le righe che contano. Una riga il cui prodotto e' sparito dal listino NON si butta
+   piu' via: la merce e' gia' sul banco e il cliente la sta aspettando, e adesso la
+   riga sa da sola quanto costa e come si chiama. Si scartano solo le righe che non
+   sanno ne' l'uno ne' l'altro, che senza il prodotto non si possono nemmeno scrivere
+   nella lista. */
 function righeVive() {
-  return stato.vendita.righe.filter(function (r) { return prodottoCon(r.id) !== null; });
+  return stato.vendita.righe.filter(function (r) {
+    return prodottoCon(r.id) !== null || Number.isFinite(r.prezzo);
+  });
 }
 
 function totale() {
   return righeVive().reduce(function (somma, r) {
-    return somma + prodottoCon(r.id).prezzo * r.qta;
+    return somma + prezzoDiRiga(r) * r.qta;
   }, 0);
 }
 
@@ -989,7 +1311,12 @@ function disegnaConto() {
     righe.appendChild(li);
   } else {
     vive.forEach(function (r) {
-      var p = prodottoCon(r.id);
+      /* Nome e prezzo si prendono dalla RIGA, non dal listino: sono quelli del
+         momento in cui il prodotto e' stato toccato, § il prezzo congelato. Cosi'
+         la lista dice le stesse cifre del totale anche mentre il listino cambia,
+         e regge una riga il cui prodotto non esiste piu'. */
+      var nome_riga = nomeDiRiga(r);
+      var prezzo_riga = prezzoDiRiga(r);
       var li = document.createElement('li');
       li.dataset.riga = r.id;
 
@@ -998,11 +1325,11 @@ function disegnaConto() {
       togli.className = 'togli';
       togli.dataset.togli = r.id;
       togli.textContent = '−';
-      togli.setAttribute('aria-label', 'Togli un ' + p.nome);
+      togli.setAttribute('aria-label', 'Togli un ' + nome_riga);
 
       var nome = document.createElement('span');
       nome.className = 'riga-nome';
-      nome.textContent = p.nome;
+      nome.textContent = nome_riga;
 
       var qta = document.createElement('span');
       qta.className = 'riga-qta';
@@ -1010,7 +1337,7 @@ function disegnaConto() {
 
       var somma = document.createElement('span');
       somma.className = 'riga-somma';
-      somma.textContent = euro(p.prezzo * r.qta);
+      somma.textContent = euro(prezzo_riga * r.qta);
 
       li.appendChild(togli);
       li.appendChild(nome);
@@ -1796,14 +2123,20 @@ var ultimo_toccato = null;
 var promemoria = '';
 
 function aggiungiPezzo(id) {
-  if (!prodottoCon(id)) { return; }
+  var p = prodottoCon(id);
+  if (!p) { return; }
   promemoria = '';
   ultimo_toccato = id;
   var trovata = false;
   stato.vendita.righe.forEach(function (r) {
     if (r.id === id) { r.qta += 1; trovata = true; }
   });
-  if (!trovata) { stato.vendita.righe.push({ id: id, qta: 1 }); }
+  /* Il prezzo e il nome si scrivono QUI, una volta sola, e non si rileggono piu':
+     e' il momento del tocco che fa fede, § il prezzo congelato. Un pezzo aggiunto
+     a una riga che c'e' gia' tiene il prezzo della riga - il cliente ha sentito un
+     prezzo solo per quel prodotto, e due prezzi nella stessa riga non si possono
+     nemmeno scrivere. */
+  if (!trovata) { stato.vendita.righe.push({ id: id, qta: 1, prezzo: p.prezzo, nome: p.nome }); }
   salva();
   disegnaTutto();
 
@@ -1833,7 +2166,8 @@ function tieniAccesoLoSchermo() {
 function togliPezzo(id) {
   ultimo_toccato = id;
   stato.vendita.righe = stato.vendita.righe.map(function (r) {
-    return r.id === id ? { id: r.id, qta: r.qta - 1 } : r;
+    // Togliere un pezzo non ricontratta il prezzo: la riga resta quella di prima.
+    return r.id === id ? { id: r.id, qta: r.qta - 1, prezzo: r.prezzo, nome: r.nome } : r;
   }).filter(function (r) { return r.qta > 0; });
   salva();
   disegnaTutto();
@@ -1866,12 +2200,17 @@ function registraVendita(da_pagare, col_buono, a_credito) {
   allineaGiornata();
 
   righeVive().forEach(function (r) {
-    var p = prodottoCon(r.id);
-    var voce = stato.giornata.voci[p.id] || { nome: p.nome, qta: 0, somma: 0 };
-    voce.nome = p.nome;
+    /* Nome e prezzo dalla RIGA, come nel totale: se si prendessero dal listino, il
+       dettaglio dei prodotti direbbe una cifra e l'incasso un'altra, e la somma
+       delle voci non tornerebbe piu' con l'incasso della giornata. La chiave resta
+       l'id del prodotto, cosi' due vendite dello stesso prodotto si sommano nella
+       stessa voce anche se nel frattempo il listino e' cambiato. */
+    var nome_riga = nomeDiRiga(r);
+    var voce = stato.giornata.voci[r.id] || { nome: nome_riga, qta: 0, somma: 0 };
+    voce.nome = nome_riga;
     voce.qta += r.qta;
-    voce.somma += p.prezzo * r.qta;
-    stato.giornata.voci[p.id] = voce;
+    voce.somma += prezzoDiRiga(r) * r.qta;
+    stato.giornata.voci[r.id] = voce;
   });
 
   stato.giornata.vendite += 1;
@@ -2079,6 +2418,32 @@ function scegliBuono(centesimi) {
 }
 
 function collegaEventi() {
+  /* Due schede dello stesso telefono aperte sulla cassa. Succede: si tocca l'icona
+     dalla schermata, e intanto la pagina era gia' aperta nel browser.
+
+     Senza questo, le due schede tengono in pancia due copie dello stesso stato e
+     l'ultima che salva vince: una chiude la cassa e archivia la giornata, l'altra -
+     che quella giornata non l'ha mai vista - al tocco dopo riscrive la memoria con
+     la sua copia vecchia e la RIPORTA IN VITA, aperta, coi soldi gia' mandati al
+     server dentro. La chiusura successiva li rimanda, e il totale del giorno e'
+     quello sbagliato.
+
+     Il browser fa scattare 'storage' soltanto nelle ALTRE schede, mai in quella che
+     ha scritto: quindi qui non si torna mai a giro per una scrittura nostra. Per
+     stare tranquilli lo stesso, questo gestore non salva niente - rilegge e
+     ridisegna, e basta. Se salvasse, due schede si rimbalzerebbero salvataggi a
+     vicenda finche' una delle due non si chiude.
+
+     Il prezzo: la scheda che aveva un carrello aperto se lo vede cambiare sotto,
+     perche' il carrello sta nella stessa memoria ed e' uno solo per tutto il
+     telefono. E' il meno peggio: tenerselo vorrebbe dire risalvarlo dopo, cioe'
+     riportare in vita una vendita che nell'altra scheda era gia' stata incassata. */
+  window.addEventListener('storage', function (e) {
+    if (e && e.key && e.key !== CHIAVE) { return; }
+    stato = carica();
+    ridisegnaQuelloCheSiVede();
+  });
+
   Array.prototype.forEach.call(document.querySelectorAll('.scheda'), function (b) {
     b.addEventListener('click', function () { vaiA(b.dataset.vai); });
   });
@@ -2220,8 +2585,13 @@ function collegaEventi() {
       if (!p) { return; }
       if (!window.confirm('Elimino «' + p.nome + '» dalla cassa?')) { return; }
       var prima_elimina = copiaProdotti();
+      /* Si toglie dal LISTINO, non dal conto in corso. Fino al 17 settembre 2026 qui
+         spariva anche la riga della vendita aperta, e col cliente che aveva le
+         pizzette in mano se ne andavano 6,00 € dal conto. Adesso la riga si porta
+         dietro prezzo e nome, § il prezzo congelato, quindi ha tutto quello che le
+         serve per restare: la merce e' gia' sul banco e si incassa lo stesso. Il
+         prodotto tolto semplicemente non si puo' piu' battere dalla vendita dopo. */
       stato.prodotti = stato.prodotti.filter(function (x) { return x.id !== p.id; });
-      stato.vendita.righe = stato.vendita.righe.filter(function (r) { return r.id !== p.id; });
       salvaProdotti(prima_elimina);
       return;
     }
