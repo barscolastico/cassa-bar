@@ -1857,86 +1857,254 @@ function apriChiudiGiorno(li) {
 
 // --------------------------------------------------------------- riepilogo da salvare
 
-function virgola(centesimi) {
-  return (centesimi / 100).toFixed(2).replace('.', ',');
+/* Il riepilogo dell'anno, in Excel. Qui si decide cosa ci va scritto; il file lo
+   impagina documento.js, come per il Word.
+
+   Fino alla versione 16 era un .csv - § il foglio Excel in documento.js, per il
+   perche' non lo e' piu' - con due tabelle una sotto l'altra e colonne che si
+   capivano solo sapendo come funziona la cassa. Adesso sono tre linguette:
+
+     - «Giorni»: una riga per giorno di apertura, il totale in fondo, e sotto la
+       spiegazione di ogni colonna. E' quella che serve alla scuola;
+     - «Prodotti»: quanto ha fatto ogni prodotto in tutto l'anno. Nel .csv non
+       c'era, e per saperlo bisognava sommare a mano il dettaglio;
+     - «Prodotti per giorno»: il dettaglio di prima, con il prezzo e il giorno
+       della settimana, in ordine.
+
+   Il denaro arriva al foglio come NUMERO in euro, non come testo: e' l'unico altro
+   posto, oltre a euro(), in cui i centesimi diventano euro, ed e' qui sotto, in
+   numeroEuro(). Un numero vero si somma, si filtra e si mette in un grafico; il
+   «19,50» del .csv era un numero solo per un Excel in italiano. */
+function numeroEuro(centesimi) {
+  return { numero: centesimi / 100, formato: 'euro' };
 }
 
-/* Un campo del foglio, scritto in modo che non possa rompere la riga.
-
-   Due guai diversi, e tutti e due si vedono solo aprendo il file mesi dopo:
-   il punto e virgola separa le colonne, quindi un prodotto chiamato «Acqua;
-   naturale» spezzerebbe la riga in due e sposterebbe l'incasso sotto la colonna
-   sbagliata; e un nome che comincia per = + - @ viene letto da Excel e LibreOffice
-   come una FORMULA invece che come testo. Le virgolette raddoppiate sono il modo
-   standard di dire «questo e' tutto un campo solo»; l'apice davanti disinnesca la
-   formula e non si vede nella cella. */
-function campo(testo) {
-  var t = String(testo);
-  if (t.length > 0 && '=+-@'.indexOf(t.charAt(0)) !== -1) { t = "'" + t; }
-
-  var scomodo = t.indexOf('"') !== -1 || t.indexOf(';') !== -1 ||
-                t.indexOf('\n') !== -1 || t.indexOf('\r') !== -1;
-
-  return scomodo ? '"' + t.replace(/"/g, '""') + '"' : t;
+function numeroIntero(n) {
+  return { numero: n, formato: 'intero' };
 }
 
-/* Un foglio che si apre con Excel o LibreOffice. Punto e virgola come separatore e
-   virgola nei decimali: e' quello che si aspetta un foglio di calcolo italiano. */
+/* Il prezzo di un pezzo, ricavato da quanto ha fatto una voce. Se in quel giorno il
+   prezzo e' cambiato a meta' il conto non viene tondo, e allora la cella resta vuota
+   invece di mostrare una media che sul listino non c'e' mai stata. */
+function prezzoDiVoce(v) {
+  if (!v || !(v.qta > 0) || v.somma % v.qta !== 0) { return null; }
+  return v.somma / v.qta;
+}
+
+function giornoDellaSettimana(iso) {
+  var p = iso.split('-');
+  return GIORNI_SETTIMANA[new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay()];
+}
+
+/* Le due note che si vedono sulla riga dello Storico, con le stesse parole. Su un
+   foglio che gira fuori dall'app dicono perche' quel numero potrebbe non essere
+   l'ultima parola. */
+function noteDelGiorno(g) {
+  var note = [];
+  if (g.automatica) { note.push('cassa non chiusa a mano'); }
+  if (g.da_inviare && window.Sincronia.configurato()) { note.push('non ancora mandata al server'); }
+  return note.join(' · ');
+}
+
 function riepilogoAnno() {
   var giorni = giornateDellAnno();
   var t = totaliAnno(giorni);
   var anno = annoCorrente();
-  var r = [];
+  var scaricato = 'Scaricato il ' + dataLunga(oggi(), true);
 
-  r.push('Bar scolastico - riepilogo anno ' + anno);
-  r.push('');
-  /* «Incasso» resta quanto si e' VENDUTO e resta dov'era: le colonne nuove si
-     aggiungono in fondo, cosi' un file vecchio e uno nuovo restano confrontabili.
-     «Contanti» e' quello che deve esserci nella scatola; «Buoni» e' la parte che
-     nella scatola non e' mai entrata perche' nessuno l'ha pagata, «Crediti» quella
-     che non e' entrata ancora. Senza questa divisione il foglio dichiarerebbe alla
-     scuola soldi che la scuola non ha visto.
+  // ------------------------------------------------ «Giorni»
 
-     «Contanti» cambia valore ma non significato: ha sempre voluto dire «quello che
-     e' finito nella scatola», e una vendita a credito nella scatola non finisce.
-     Nei file di prima i crediti sono zero, quindi le somme vecchie restano quelle. */
-  r.push('Giorno;Data;Vendite;Pezzi;Incasso;Contanti;Buoni;Crediti');
+  var come = comeSiEPagato(t.incasso, t.buoni, t.crediti);
+  var righe = [
+    { tipo: 'titolo', celle: ['Bar scolastico · riepilogo dell\'anno scolastico ' + anno] },
+    { tipo: 'forte', celle: ['Incasso dell\'anno: ' + euro(t.incasso) + (come ? ', ' + come : '')] },
+    { tipo: 'tenue', celle: [scaricato + ' · ' + giorni.length +
+      (giorni.length === 1 ? ' giorno' : ' giorni') + ' di apertura · ' + t.vendite +
+      (t.vendite === 1 ? ' vendita' : ' vendite') + ' · ' + t.pezzi +
+      (t.pezzi === 1 ? ' pezzo' : ' pezzi')] },
+    { tipo: 'vuota', celle: [] },
+    /* «Incasso» resta quanto si e' VENDUTO, come in tutta l'app; le tre colonne dopo
+       sono le sue parti e lo sommano. Senza questa divisione il foglio dichiarerebbe
+       alla scuola soldi che la scuola non ha visto. */
+    { tipo: 'intestazione', celle: ['Data', 'Giorno', 'Vendite', 'Pezzi', 'Incasso (€)',
+      'In contanti (€)', 'Con buoni (€)', 'A credito (€)', 'Note'] }
+  ];
+
+  var automatiche = false;
+  var in_coda = false;
 
   giorni.forEach(function (g) {
     var b = quotaBuoni(g);
     var c = quotaCrediti(g);
-    r.push(campo(dataLunga(g.data, true)) + ';' + g.data + ';' + g.vendite + ';' +
-           pezziDelGiorno(g) + ';' + virgola(g.incasso) + ';' +
-           virgola(g.incasso - b - c) + ';' + virgola(b) + ';' + virgola(c));
+    var note = noteDelGiorno(g);
+    automatiche = automatiche || !!g.automatica;
+    in_coda = in_coda || (g.da_inviare && window.Sincronia.configurato());
+    righe.push({ tipo: 'riga', celle: [
+      { data: g.data }, giornoDellaSettimana(g.data), numeroIntero(g.vendite),
+      numeroIntero(pezziDelGiorno(g)), numeroEuro(g.incasso), numeroEuro(g.incasso - b - c),
+      numeroEuro(b), numeroEuro(c), note || null
+    ] });
   });
 
-  r.push('TOTALE;;' + t.vendite + ';' + t.pezzi + ';' + virgola(t.incasso) + ';' +
-         virgola(t.incasso - t.buoni - t.crediti) + ';' + virgola(t.buoni) + ';' +
-         virgola(t.crediti));
-  r.push('');
-  r.push('Dettaglio per prodotto');
-  r.push('Data;Prodotto;Pezzi;Incasso');
+  righe.push({ tipo: 'totale', celle: [
+    'Totale', null, numeroIntero(t.vendite), numeroIntero(t.pezzi), numeroEuro(t.incasso),
+    numeroEuro(t.incasso - t.buoni - t.crediti), numeroEuro(t.buoni), numeroEuro(t.crediti), null
+  ] });
+
+  /* Le colonne spiegate sul foglio stesso: il file lo apre anche chi l'app non l'ha
+     mai vista, e «Vendite» accanto a «Pezzi» senza spiegazione si legge come la
+     stessa cosa scritta due volte. */
+  var legenda = [
+    'Vendite: quante volte si è premuto «Incassa» o «Credito», cioè quanti clienti sono stati serviti.',
+    'Pezzi: quanti prodotti sono usciti dal banco.',
+    'Incasso: il valore di tutto quello che si è venduto. È la somma delle tre colonne che seguono.',
+    'In contanti: i soldi che devono esserci nella scatola.',
+    'Con buoni: la parte pagata con un buono. Non sono soldi entrati nella scatola.',
+    'A credito: la merce data senza pagare. Chi deve pagare è scritto sul quaderno dei crediti:',
+    'questo foglio non sa chi ha già pagato.'
+  ];
+  if (automatiche) {
+    legenda.push('«Cassa non chiusa a mano»: quel giorno nessuno ha premuto «Chiudi cassa», ' +
+      'e la giornata è stata archiviata da sola.');
+  }
+  if (in_coda) {
+    legenda.push('«Non ancora mandata al server»: su altri dispositivi i totali di quel ' +
+      'giorno possono essere più bassi.');
+  }
+
+  righe.push({ tipo: 'vuota', celle: [] });
+  righe.push({ tipo: 'forte', celle: ['Come si leggono le colonne'] });
+  legenda.forEach(function (l) { righe.push({ tipo: 'tenue', celle: [l] }); });
+  righe.push({ tipo: 'vuota', celle: [] });
+  righe.push({ tipo: 'tenue', celle: ['Il ricavato resta alla scuola. Questo foglio non è uno scontrino fiscale.'] });
+
+  var foglio_giorni = {
+    nome: 'Giorni', fisse: 5, orizzontale: true,
+    larghezze: [12, 11, 9, 8, 13, 15, 14, 14, 34],
+    righe: righe
+  };
+
+  // ------------------------------------------------ «Prodotti per giorno»
+
+  /* Una riga per prodotto e per giorno, come nel .csv, ma in ordine: prima il
+     giorno, poi dal prodotto che ha venduto piu' pezzi, come nel foglio Word. */
+  var dettaglio = [];
+  var per_prodotto = {};
+  var somma_voci = 0;
 
   giorni.forEach(function (g) {
-    Object.keys(g.voci).forEach(function (k) {
-      var v = g.voci[k];
-      r.push(g.data + ';' + campo(v.nome) + ';' + v.qta + ';' + virgola(v.somma));
+    var voci = g.voci || {};
+    Object.keys(voci).sort(function (a, b) {
+      return voci[b].qta - voci[a].qta || voci[a].nome.localeCompare(voci[b].nome, 'it');
+    }).forEach(function (k) {
+      var v = voci[k];
+      var prezzo = prezzoDiVoce(v);
+      dettaglio.push({ tipo: 'riga', celle: [
+        { data: g.data }, giornoDellaSettimana(g.data), v.nome,
+        prezzo === null ? null : numeroEuro(prezzo), numeroIntero(v.qta), numeroEuro(v.somma)
+      ] });
+
+      /* Nell'anno lo stesso prodotto si riconosce dal nome E dal prezzo. Dal nome
+         solo, i tre «Pasto» del listino - da 3, 4 e 5 euro - diventerebbero uno; e
+         un prodotto che ha cambiato prezzo a meta' anno avrebbe un prezzo solo,
+         sbagliato per meta' delle righe. Cosi' compare una riga per prezzo. */
+      var chiave = v.nome + '\u0000' + (prezzo === null ? 'misto' : prezzo);
+      var p = per_prodotto[chiave];
+      if (!p) { p = per_prodotto[chiave] = { nome: v.nome, prezzo: prezzo, qta: 0, somma: 0 }; }
+      p.qta += v.qta;
+      p.somma += v.somma;
+      somma_voci += v.somma;
     });
   });
 
-  return r.join('\r\n');
+  var pezzi_voci = dettaglio.reduce(function (n, r) { return n + r.celle[4].numero; }, 0);
+
+  var foglio_dettaglio = {
+    nome: 'Prodotti per giorno', fisse: 4, orizzontale: false,
+    larghezze: [12, 11, 28, 11, 8, 13],
+    righe: [
+      { tipo: 'titolo', celle: ['Prodotti giorno per giorno · anno scolastico ' + anno] },
+      { tipo: 'tenue', celle: ['Una riga per ogni prodotto venduto in ogni giorno. ' + scaricato + '.'] },
+      { tipo: 'vuota', celle: [] },
+      { tipo: 'intestazione', celle: ['Data', 'Giorno', 'Prodotto', 'Prezzo (€)', 'Pezzi', 'Incasso (€)'] }
+    ].concat(dettaglio, [
+      { tipo: 'totale', celle: ['Totale', null, null, null, numeroIntero(pezzi_voci), numeroEuro(somma_voci)] }
+    ])
+  };
+
+  // ------------------------------------------------ «Prodotti»
+
+  var prodotti = Object.keys(per_prodotto).map(function (k) { return per_prodotto[k]; });
+  prodotti.sort(function (a, b) {
+    return b.somma - a.somma || b.qta - a.qta || a.nome.localeCompare(b.nome, 'it');
+  });
+
+  var nomi_visti = {};
+  var doppi = false;
+  prodotti.forEach(function (p) {
+    if (nomi_visti[p.nome]) { doppi = true; }
+    nomi_visti[p.nome] = true;
+  });
+
+  var righe_prodotti = [
+    { tipo: 'titolo', celle: ['Prodotti venduti · anno scolastico ' + anno] },
+    { tipo: 'tenue', celle: ['Tutto l\'anno fino a oggi, dal prodotto che ha incassato di più. ' +
+      scaricato + '.'] },
+    { tipo: 'vuota', celle: [] },
+    { tipo: 'intestazione', celle: ['Prodotto', 'Prezzo (€)', 'Pezzi', 'Incasso (€)'] }
+  ];
+  prodotti.forEach(function (p) {
+    righe_prodotti.push({ tipo: 'riga', celle: [
+      p.nome, p.prezzo === null ? null : numeroEuro(p.prezzo), numeroIntero(p.qta), numeroEuro(p.somma)
+    ] });
+  });
+  righe_prodotti.push({ tipo: 'totale', celle: [
+    'Totale', null, numeroIntero(pezzi_voci), numeroEuro(somma_voci)
+  ] });
+
+  var avvisi = [];
+  if (doppi) {
+    avvisi.push('Un prodotto venduto a prezzi diversi compare su una riga per ogni prezzo.');
+  }
+  /* Di un giorno puo' essere rimasto solo il totale, senza il dettaglio dei
+     prodotti: allora questa tabella somma meno dell'incasso dell'anno, e va detto
+     qui, dove la differenza si vede, e non lasciato da scoprire. */
+  if (somma_voci !== t.incasso) {
+    avvisi.push('Questa tabella somma ' + euro(somma_voci) + ', l\'incasso dell\'anno è ' +
+      euro(t.incasso) + ':');
+    avvisi.push('di qualche giorno è rimasto solo il totale, non il dettaglio dei prodotti.');
+  }
+  if (avvisi.length) {
+    righe_prodotti.push({ tipo: 'vuota', celle: [] });
+    avvisi.forEach(function (a) { righe_prodotti.push({ tipo: 'tenue', celle: [a] }); });
+  }
+
+  var foglio_prodotti = {
+    nome: 'Prodotti', fisse: 4, orizzontale: false,
+    larghezze: [28, 11, 9, 13],
+    righe: righe_prodotti
+  };
+
+  return [foglio_giorni, foglio_prodotti, foglio_dettaglio];
 }
 
+/* Il pulsante c'e' su tutti i dispositivi, anche su quelli che possono solo
+   guardare, come quello del Word: copiare fuori quello che si ha gia' davanti agli
+   occhi non cambia niente per nessuno. Il permesso serve per toccare i conti, non
+   per leggerli. */
 function scaricaRiepilogo() {
   if (giornateDellAnno().length === 0) { return; }
 
-  var anno = annoCorrente().replace('/', '-');
-  var nome = 'bar-scolastico-' + anno + '.csv';
+  // La data nel nome: due riepiloghi scaricati in mesi diversi non si confondono.
+  var nome = 'bar-scolastico-' + annoCorrente().replace('/', '-') + '-al-' + oggi() + '.xlsx';
 
-  // Il segno iniziale dice a Excel che il file e' in UTF-8: senza, le accentate si rompono.
-  var blob = new Blob(['﻿' + riepilogoAnno()], { type: 'text/csv;charset=utf-8' });
-
-  window.Documento.scarica(blob, nome);
+  /* Se qualcosa va storto lo si deve VEDERE, come per il Word: un pulsante che non
+     fa niente e non dice niente si scopre solo il giorno che serve il file. */
+  try {
+    window.Documento.scarica(window.Documento.foglio(riepilogoAnno()), nome);
+  } catch (e) {
+    window.alert('Il file Excel non è stato creato: ' + (e.message || 'errore sconosciuto.'));
+  }
 }
 
 // --------------------------------------------------------------- la giornata in Word

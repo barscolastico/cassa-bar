@@ -1,9 +1,11 @@
-/* Il file Word: come si costruisce un .docx a mano, senza librerie.
+/* Il file Word e il file Excel: come si costruiscono un .docx e un .xlsx a mano,
+   senza librerie.
 
-   Serve a una cosa sola: portare fuori dall'app un foglio che si stampa, si legge e
-   si firma. I NUMERI per la scuola escono da un'altra parte - il riepilogo dell'anno
-   in fondo allo Storico, che e' un foglio di calcolo e si somma. Questo no: questo
-   e' carta.
+   Il Word porta fuori dall'app una giornata sola, su un foglio che si stampa, si
+   legge e si firma: e' carta. I NUMERI per la scuola escono invece dal file Excel -
+   il riepilogo dell'anno in fondo allo Storico, che e' un foglio di calcolo e si
+   somma. Tutti e due sono uno zip con dentro dei file XML, e lo zip e' uno solo, qui
+   sotto. Il foglio Excel sta in fondo, § il foglio Excel.
 
    PERCHE' TUTTO QUESTO CODICE. Un .docx non e' un file di testo: e' una cartella
    compressa - uno zip - con dentro tre file scritti in XML. Di solito lo costruisce
@@ -347,6 +349,396 @@ var RELAZIONI =
 var TIPO_WORD =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+// --------------------------------------------------------------- il foglio Excel
+
+/* Il riepilogo dell'anno in Excel: un .xlsx vero, costruito come il .docx qui sopra.
+
+   PERCHE' NON PIU' IL .CSV. Fino alla versione 16 il riepilogo era un .csv, cioe'
+   testo con i punti e virgola in mezzo. Excel sul PC lo apriva bene, ma tutto il
+   resto doveva indovinare: su un telefono finiva spesso tutto in una colonna sola,
+   e «19,50» era un numero o una parola a seconda della lingua del programma. Un
+   .xlsx dice da se' cosa c'e' in ogni cella - questo e' un numero, questa una data,
+   questo un testo - e nessuno deve indovinare niente.
+
+   E' lo stesso zip di sempre, con dentro altri file XML: il quaderno, un foglio per
+   ogni linguetta, gli stili, e l'elenco delle parole.
+
+   COSA RICEVE. Un elenco di fogli, ognuno {nome, larghezze, fisse, orizzontale, righe}:
+     - nome: quello della linguetta in basso;
+     - larghezze: quanto e' larga ogni colonna, in caratteri;
+     - fisse: quante righe in alto restano ferme mentre si scorre;
+     - orizzontale: se in stampa il foglio va messo di traverso;
+     - righe: {tipo, celle}, coi tipi elencati in STILI_FOGLIO.
+   Una cella e' un testo, oppure {numero, formato} col formato 'intero' o 'euro',
+   oppure {data: 'AAAA-MM-GG'}, oppure null se resta vuota.
+
+   QUI DENTRO NON SI CONTANO SOLDI nemmeno adesso. Gli euro arrivano gia' euro da
+   cassa.js, e qui si scrivono come numeri col punto, perche' e' cosi' che li vuole
+   il file: la virgola e il simbolo li mette Excel quando li mostra. L'unica cosa che
+   si aggiunge e' la formula delle righe «totale», § cellaFoglio. */
+
+/* Come si vede ogni tipo di riga. I numeri sono le posizioni in <cellXfs>, dentro
+   STILI_XML qui sotto: «testo» per le celle di parole, «intero», «euro» e «data»
+   per le altre, «rientrato» per un testo subito a destra di una colonna di numeri,
+   § colonneDiNumeri. */
+var STILI_FOGLIO = {
+  titolo:       { testo: 1 },
+  tenue:        { testo: 2 },
+  forte:        { testo: 3 },
+  intestazione: { testo: 4, numero: 5, rientrato: 13 },
+  riga:         { testo: 0, intero: 7, euro: 8, data: 6, rientrato: 12 },
+  totale:       { testo: 9, intero: 10, euro: 11, data: 9, rientrato: 9 },
+  vuota:        { testo: 0 }
+};
+
+/* Gli stili veri, nell'ordine che il formato pretende. Due trappole, tutte e due
+   scritte nelle specifiche e tutte e due capaci di far dire a Excel «il file e'
+   danneggiato»: i primi due riempimenti devono essere proprio «nessuno» e «grigio
+   al 12,5%», anche se nessuna cella li usa; e gli elenchi dentro styles.xml vanno
+   in quest'ordine - formati, caratteri, riempimenti, bordi, stili.
+
+   I due formati nostri: gli euro con due decimali e il simbolo dopo, le date come
+   giorno, mese e anno. «#,##0» e' uno di quelli che Excel ha gia' dentro, col
+   numero 3: i pezzi, coi separatori delle migliaia. */
+var STILI_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+  '<numFmts count="2">' +
+  '<numFmt numFmtId="164" formatCode="#,##0.00\\ &quot;€&quot;"/>' +
+  '<numFmt numFmtId="165" formatCode="dd/mm/yyyy"/>' +
+  '</numFmts>' +
+  '<fonts count="4">' +
+  '<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
+  '<font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
+  '<font><b/><sz val="14"/><color rgb="FF0F766E"/><name val="Calibri"/><family val="2"/></font>' +
+  '<font><sz val="10"/><color rgb="FF555555"/><name val="Calibri"/><family val="2"/></font>' +
+  '</fonts>' +
+  '<fills count="4">' +
+  '<fill><patternFill patternType="none"/></fill>' +
+  '<fill><patternFill patternType="gray125"/></fill>' +
+  '<fill><patternFill patternType="solid"><fgColor rgb="FFEEEEEE"/><bgColor indexed="64"/></patternFill></fill>' +
+  '<fill><patternFill patternType="solid"><fgColor rgb="FFF5F5F5"/><bgColor indexed="64"/></patternFill></fill>' +
+  '</fills>' +
+  '<borders count="3">' +
+  '<border><left/><right/><top/><bottom/><diagonal/></border>' +
+  '<border><left/><right/><top/><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border>' +
+  '<border><left/><right/><top style="thin"><color rgb="FF999999"/></top><bottom/><diagonal/></border>' +
+  '</borders>' +
+  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+  '<cellXfs count="14">' +
+  // 0 testo normale
+  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+  // 1 titolo, 2 tenue, 3 forte
+  '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+  '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+  '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+  // 4 intestazione sopra un testo, 5 intestazione sopra un numero: va a destra come lui
+  '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>' +
+  '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf>' +
+  // 6 data, 7 intero, 8 euro
+  '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>' +
+  '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+  // 9 totale testo, 10 totale intero, 11 totale euro
+  '<xf numFmtId="0" fontId="1" fillId="3" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>' +
+  '<xf numFmtId="3" fontId="1" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>' +
+  '<xf numFmtId="164" fontId="1" fillId="3" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>' +
+  // 12 testo rientrato, 13 intestazione rientrata
+  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="left" indent="1"/></xf>' +
+  '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" indent="1"/></xf>' +
+  '</cellXfs>' +
+  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+  '</styleSheet>';
+
+var NS_FOGLIO = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+
+/* Da 0 ad A, da 25 a Z, da 26 ad AA: le colonne di un foglio si chiamano cosi'. */
+function lettera(i) {
+  var s = '';
+  i += 1;
+  while (i > 0) {
+    var r = (i - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    i = Math.floor((i - 1) / 26);
+  }
+  return s;
+}
+
+/* Excel conta i giorni dal 30 dicembre 1899: il 21 settembre 2026 e' il 46286.
+   Il conto si fa in UTC perche' l'ora legale non sposti nessun giorno. */
+function giornoExcel(iso) {
+  var p = String(iso).split('-');
+  return Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) / 86400000 + 25569;
+}
+
+/* Il nome di una linguetta ha regole sue: al massimo 31 caratteri, e niente
+   [ ] : * ? / \ - Excel rifiuta il file intero, non solo la linguetta. I nomi
+   li sceglie cassa.js e oggi sono innocui: questa e' la rete per il giorno che
+   qualcuno ci mette dentro una data con le barre. */
+function nomeLinguetta(nome, i) {
+  var n = String(nome || '').replace(/[\[\]:*?\/\\]/g, '-').slice(0, 31);
+  return n || 'Foglio ' + (i + 1);
+}
+
+/* Una cella. Le parole non si scrivono qui ma in un elenco a parte, comune a tutti
+   i fogli, e la cella ne porta solo il numero: e' il modo che tutti i programmi
+   leggono, anche quelli dei telefoni.
+
+   Un nome di prodotto che comincia per «=» qui resta testo e basta: e' una cella
+   di parole, e Excel non la legge come formula. Il guaio del .csv - l'apice davanti
+   da mettere a mano - qui non esiste.
+
+   Le righe «totale» portano una formula: la somma della colonna, dalla prima riga
+   dopo l'intestazione all'ultima prima del totale. Accanto c'e' il numero gia'
+   fatto da cassa.js, perche' un programma che non ricalcola - i visori dei
+   telefoni, spesso - mostri quello e non uno zero. Se si cancella una riga in
+   Excel, il totale si rifa' da solo. */
+function cellaFoglio(c, dove, tipo, parole, somma, rientro) {
+  var stili = STILI_FOGLIO[tipo] || STILI_FOGLIO.riga;
+  var r = ' r="' + dove + '"';
+
+  /* Una cella vuota in un'intestazione o in un totale si scrive lo stesso, vuota ma
+     col suo fondo grigio: se no la fascia si interrompe proprio dove manca un
+     numero, e la riga sembra fatta a pezzi. */
+  if (c === null || c === undefined) {
+    return tipo === 'intestazione' || tipo === 'totale' ? '<c' + r + ' s="' + stili.testo + '"/>' : '';
+  }
+
+  if (typeof c === 'object' && typeof c.data === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(c.data)) {
+    return '<c' + r + ' s="' + stili.data + '"><v>' + giornoExcel(c.data) + '</v></c>';
+  }
+
+  if (typeof c === 'object' && typeof c.numero === 'number') {
+    if (!Number.isFinite(c.numero)) { return ''; }
+    var s = c.formato === 'euro' ? stili.euro : stili.intero;
+    var f = somma ? '<f>SUM(' + somma + ')</f>' : '';
+    return '<c' + r + ' s="' + s + '">' + f + '<v>' + c.numero + '</v></c>';
+  }
+
+  var testo = String(typeof c === 'object' ? (c.testo === undefined ? '' : c.testo) : c);
+  var st = rientro && stili.rientrato !== undefined ? stili.rientrato : stili.testo;
+  return '<c' + r + ' s="' + st + '" t="s"><v>' + parole.numero(testo) + '</v></c>';
+}
+
+/* L'elenco delle parole di tutto il file: ogni testo ci entra una volta sola, e le
+   celle ne portano il numero. Una Map e non un oggetto, perche' un prodotto che si
+   chiama «constructor» o «__proto__» in un oggetto troverebbe un posto gia' occupato. */
+function nuoveParole() {
+  var posti = new Map();
+  var p = { elenco: [], usate: 0 };
+  p.numero = function (testo) {
+    p.usate += 1;
+    if (!posti.has(testo)) {
+      posti.set(testo, p.elenco.length);
+      p.elenco.push(testo);
+    }
+    return posti.get(testo);
+  };
+  return p;
+}
+
+/* Quali colonne di una tabella sono di numeri. Lo si capisce dalla riga sotto
+   l'intestazione: se li' c'e' un numero, la colonna e' di numeri. Serve a due cose:
+   un'intestazione sopra dei numeri va a destra come loro, se no «Incasso (€)» sta a
+   sinistra, le cifre sotto stanno a destra, e l'occhio non le lega; e un testo
+   subito a destra di una colonna di numeri si stacca di un rientro, se no le cifre
+   e le parole si toccano e «0,70 €» e «cassa non chiusa a mano» si leggono come una
+   cosa sola. */
+function colonneDiNumeri(righe, i) {
+  var sotto = righe[i + 1];
+  return (righe[i].celle || []).map(function (c, k) {
+    var giu = sotto && sotto.celle ? sotto.celle[k] : null;
+    return !!(giu && typeof giu === 'object' && typeof giu.numero === 'number');
+  });
+}
+
+function foglioXml(f, primo, parole) {
+  var righe = f.righe || [];
+  var xml_righe = '';
+  var inizio_tabella = 0;   // la prima riga di dati dopo l'ultima intestazione
+  var numeriche = [];       // quali colonne di quella tabella sono di numeri
+  var colonne = 1;
+
+  righe.forEach(function (riga, i) {
+    var n = i + 1;
+    var celle = riga.celle || [];
+    var tipo = riga.tipo || 'riga';
+    if (celle.length > colonne) { colonne = celle.length; }
+
+    var dentro = '';
+    if (tipo === 'intestazione') {
+      numeriche = colonneDiNumeri(righe, i);
+      var stili = STILI_FOGLIO.intestazione;
+      celle.forEach(function (c, k) {
+        if (c === null || c === undefined) {
+          dentro += cellaFoglio(null, lettera(k) + n, tipo, parole, null, false);
+          return;
+        }
+        var s = numeriche[k] ? stili.numero : (numeriche[k - 1] ? stili.rientrato : stili.testo);
+        dentro += '<c r="' + lettera(k) + n + '" s="' + s + '" t="s"><v>' +
+          parole.numero(String(c)) + '</v></c>';
+      });
+      inizio_tabella = n + 1;
+    } else {
+      // La fascia grigia del totale arriva fin dove arriva l'intestazione.
+      var quante = tipo === 'totale' ? Math.max(celle.length, numeriche.length) : celle.length;
+      for (var k = 0; k < quante; k++) {
+        var somma = null;
+        if (tipo === 'totale' && inizio_tabella > 0 && inizio_tabella <= n - 1) {
+          somma = lettera(k) + inizio_tabella + ':' + lettera(k) + (n - 1);
+        }
+        var rientro = (tipo === 'riga' || tipo === 'totale') && k > 0 && !!numeriche[k - 1];
+        dentro += cellaFoglio(celle[k], lettera(k) + n, tipo, parole, somma, rientro);
+      }
+    }
+
+    // Il titolo e' piu' grande: la sua riga si dichiara piu' alta, perche' non tutti
+    // i programmi la allargano da soli e il titolo uscirebbe tagliato.
+    var alta = tipo === 'titolo' ? ' ht="21" customHeight="1"' : '';
+    xml_righe += '<row r="' + n + '"' + alta + '>' + dentro + '</row>';
+  });
+
+  var larghezze = f.larghezze || [];
+  var cols = larghezze.length ? '<cols>' + larghezze.map(function (w, k) {
+    return '<col min="' + (k + 1) + '" max="' + (k + 1) + '" width="' + w + '" customWidth="1"/>';
+  }).join('') + '</cols>' : '';
+  if (larghezze.length > colonne) { colonne = larghezze.length; }
+
+  var fisse = f.fisse > 0 && f.fisse < righe.length ? f.fisse : 0;
+  var vista = '<sheetView workbookViewId="0"' + (primo ? ' tabSelected="1"' : '') + '>';
+  if (fisse) {
+    var sotto = 'A' + (fisse + 1);
+    vista += '<pane ySplit="' + fisse + '" topLeftCell="' + sotto +
+      '" activePane="bottomLeft" state="frozen"/>' +
+      '<selection pane="bottomLeft" activeCell="' + sotto + '" sqref="' + sotto + '"/>';
+  }
+  vista += '</sheetView>';
+
+  /* In stampa: A4, tutto il foglio largo una pagina, e quante pagine servono in
+     altezza. E' il foglio che va alla scuola, e una colonna che finisce da sola
+     su un'altra pagina non la legge nessuno. */
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet ' + NS_FOGLIO + '>' +
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' +
+    '<dimension ref="A1:' + lettera(colonne - 1) + Math.max(1, righe.length) + '"/>' +
+    '<sheetViews>' + vista + '</sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="15"/>' +
+    cols +
+    '<sheetData>' + xml_righe + '</sheetData>' +
+    '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>' +
+    '<pageSetup paperSize="9" orientation="' + (f.orizzontale ? 'landscape' : 'portrait') +
+    '" fitToWidth="1" fitToHeight="0"/>' +
+    '</worksheet>';
+}
+
+/* In stampa, l'intestazione delle colonne si ripete in cima a ogni pagina: senza, da
+   pagina due in giu' «Pezzi» e «Incasso» sono due colonne di numeri senza nome. E'
+   l'ultima delle righe ferme, quella che le tiene ferme anche sullo schermo.
+
+   Il nome della linguetta va fra apici, e un apice dentro il nome si raddoppia: e'
+   la regola di Excel per «Prodotti per giorno», che ha degli spazi. */
+function righeDaRipetere(nomi, ripetute) {
+  var dentro = '';
+  nomi.forEach(function (nome, i) {
+    var r = ripetute[i];
+    if (!r) { return; }
+    dentro += '<definedName name="_xlnm.Print_Titles" localSheetId="' + i + '">' +
+      xml("'" + nome.replace(/'/g, "''") + "'!$" + r + ':$' + r) + '</definedName>';
+  });
+  return dentro ? '<definedNames>' + dentro + '</definedNames>' : '';
+}
+
+/* Il foglio intero. Un elenco di file come per il .docx, piu' lunghi: ogni linguetta
+   e' un file a se', e il quaderno li elenca. */
+function fileFoglio(fogli) {
+  var parole = nuoveParole();
+  var elenco = fogli && fogli.length ? fogli : [{ nome: 'Foglio 1', righe: [] }];
+  var nomi = [];
+  var usati = {};
+  var ripetute = [];
+
+  var pagine = elenco.map(function (f, i) {
+    // Due linguette con lo stesso nome rompono il file: la seconda prende un numero.
+    var nome = nomeLinguetta(f.nome, i);
+    var base = nome;
+    var giro = 2;
+    while (usati[nome.toLowerCase()]) {
+      var coda = ' (' + giro + ')';
+      nome = base.slice(0, 31 - coda.length) + coda;
+      giro += 1;
+    }
+    usati[nome.toLowerCase()] = true;
+    nomi.push(nome);
+    ripetute.push(f.fisse > 0 && f.righe && f.fisse < f.righe.length ? f.fisse : 0);
+    return foglioXml(f, i === 0, parole);
+  });
+
+  var parole_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' +
+    parole.usate + '" uniqueCount="' + parole.elenco.length + '">' +
+    parole.elenco.map(function (t) {
+      return '<si><t xml:space="preserve">' + xml(t) + '</t></si>';
+    }).join('') + '</sst>';
+
+  var quaderno = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook ' + NS_FOGLIO + '>' +
+    '<bookViews><workbookView activeTab="0"/></bookViews><sheets>' +
+    nomi.map(function (n, i) {
+      return '<sheet name="' + xml(n) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+    }).join('') + '</sheets>' + righeDaRipetere(nomi, ripetute) +
+    // Excel rifa' i conti all'apertura: le somme dei totali sono sempre le sue.
+    '<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>';
+
+  var legami = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    nomi.map(function (n, i) {
+      return '<Relationship Id="rId' + (i + 1) + '" Target="worksheets/sheet' + (i + 1) +
+        '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>';
+    }).join('') +
+    '<Relationship Id="rId' + (nomi.length + 1) + '" Target="styles.xml" ' +
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"/>' +
+    '<Relationship Id="rId' + (nomi.length + 2) + '" Target="sharedStrings.xml" ' +
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"/>' +
+    '</Relationships>';
+
+  var tipi = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    nomi.map(function (n, i) {
+      return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ' +
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    }).join('') +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
+    '</Types>';
+
+  var radice = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Target="xl/workbook.xml" ' +
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/>' +
+    '</Relationships>';
+
+  var parti = [
+    { nome: '[Content_Types].xml', testo: tipi },
+    { nome: '_rels/.rels', testo: radice },
+    { nome: 'xl/workbook.xml', testo: quaderno },
+    { nome: 'xl/_rels/workbook.xml.rels', testo: legami },
+    { nome: 'xl/styles.xml', testo: STILI_XML },
+    { nome: 'xl/sharedStrings.xml', testo: parole_xml }
+  ];
+  pagine.forEach(function (p, i) {
+    parti.push({ nome: 'xl/worksheets/sheet' + (i + 1) + '.xml', testo: p });
+  });
+  return parti;
+}
+
+var TIPO_EXCEL =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
 // --------------------------------------------------------------- quello che esce
 
 window.Documento = {
@@ -360,6 +752,12 @@ window.Documento = {
       { nome: '_rels/.rels', testo: RELAZIONI },
       { nome: 'word/document.xml', testo: corpoDocumento(blocchi) }
     ])], { type: TIPO_WORD });
+  },
+
+  /* Da un elenco di fogli al file Excel finito. Com'e' fatto un foglio sta scritto
+     sopra fileFoglio(). */
+  foglio: function (fogli) {
+    return new Blob([zip(fileFoglio(fogli))], { type: TIPO_EXCEL });
   },
 
   /* Il modo di far scendere un file dal browser: si finge un collegamento, gli si
